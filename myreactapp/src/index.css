@@ -1,0 +1,254 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Modern Professional Color Palette */
+    --background: 218 50% 97%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    /* Trust & Reliability - Professional Blue */
+    --primary: 214 84% 56%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 214 84% 66%;
+
+    /* Efficiency & Action - Confident Teal */
+    --secondary: 184 77% 34%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Safety & Success - Trustworthy Green */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Attention & Warning - Professional Amber */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Neutral Tones - Clean and Modern */
+    --muted: 218 27% 94%;
+    --muted-foreground: 215 16% 46%;
+
+    --accent: 184 77% 34%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 218 20% 88%;
+    --input: 218 20% 88%;
+    --ring: 214 84% 56%;
+
+    /* Modern Border Radius */
+    --radius: 0.875rem;
+
+    /* Gradients for Modern UI */
+    --gradient-primary: linear-gradient(135deg, hsl(214 84% 56%), hsl(214 84% 66%));
+    --gradient-secondary: linear-gradient(135deg, hsl(184 77% 34%), hsl(184 77% 44%));
+    --gradient-subtle: linear-gradient(180deg, hsl(218 50% 97%), hsl(218 27% 94%));
+
+    /* Elegant Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(218 20% 88% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(218 20% 88% / 0.1), 0 2px 4px -1px hsl(218 20% 88% / 0.06);
+    --shadow-lg: 0 10px 15px -3px hsl(218 20% 88% / 0.1), 0 4px 6px -2px hsl(218 20% 88% / 0.05);
+    --shadow-elegant: 0 20px 25px -5px hsl(214 84% 56% / 0.1), 0 10px 10px -5px hsl(214 84% 56% / 0.04);
+
+    /* Smooth Transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark theme - Professional Night Mode */
+    --background: 215 25% 11%;
+    --foreground: 218 20% 95%;
+
+    --card: 215 25% 14%;
+    --card-foreground: 218 20% 95%;
+
+    --popover: 215 25% 14%;
+    --popover-foreground: 218 20% 95%;
+
+    /* Trust & Reliability - Bright Professional Blue */
+    --primary: 214 84% 66%;
+    --primary-foreground: 215 25% 11%;
+    --primary-glow: 214 84% 76%;
+
+    /* Efficiency & Action - Bright Teal */
+    --secondary: 184 77% 44%;
+    --secondary-foreground: 215 25% 11%;
+
+    /* Safety & Success - Bright Green */
+    --success: 142 71% 55%;
+    --success-foreground: 215 25% 11%;
+
+    /* Attention & Warning - Bright Amber */
+    --warning: 38 92% 60%;
+    --warning-foreground: 215 25% 11%;
+
+    --muted: 215 25% 20%;
+    --muted-foreground: 218 15% 65%;
+
+    --accent: 184 77% 44%;
+    --accent-foreground: 215 25% 11%;
+
+    --destructive: 0 72% 61%;
+    --destructive-foreground: 215 25% 11%;
+
+    --border: 215 25% 24%;
+    --input: 215 25% 24%;
+    --ring: 214 84% 66%;
+
+    /* Dark Mode Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(214 84% 66%), hsl(214 84% 76%));
+    --gradient-secondary: linear-gradient(135deg, hsl(184 77% 44%), hsl(184 77% 54%));
+    --gradient-subtle: linear-gradient(180deg, hsl(215 25% 11%), hsl(215 25% 14%));
+
+    /* Dark Mode Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(215 25% 5% / 0.3);
+    --shadow-md: 0 4px 6px -1px hsl(215 25% 5% / 0.4), 0 2px 4px -1px hsl(215 25% 5% / 0.2);
+    --shadow-lg: 0 10px 15px -3px hsl(215 25% 5% / 0.4), 0 4px 6px -2px hsl(215 25% 5% / 0.2);
+    --shadow-elegant: 0 20px 25px -5px hsl(214 84% 66% / 0.2), 0 10px 10px -5px hsl(214 84% 66% / 0.1);
+
+    /* Sidebar Dark */
+    --sidebar-background: 215 25% 8%;
+    --sidebar-foreground: 218 20% 95%;
+    --sidebar-primary: 214 84% 66%;
+    --sidebar-primary-foreground: 215 25% 8%;
+    --sidebar-accent: 215 25% 18%;
+    --sidebar-accent-foreground: 218 20% 95%;
+    --sidebar-border: 215 25% 20%;
+    --sidebar-ring: 214 84% 66%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-inter antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    
+    /* Mobile optimizations */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overflow-x: hidden;
+  }
+
+  /* Mobile-first responsive container */
+  #root {
+    @apply min-h-screen w-full;
+    /* Safe area support for iOS notch */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Enhanced Typography */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-poppins font-semibold tracking-tight;
+  }
+
+  h1 {
+    @apply text-3xl md:text-4xl lg:text-5xl;
+  }
+
+  h2 {
+    @apply text-2xl md:text-3xl;
+  }
+
+  h3 {
+    @apply text-xl md:text-2xl;
+  }
+
+  /* Modern Button Styles */
+  button {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  /* Enhanced Focus States */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Smooth Scroll */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Enhanced Selection */
+  ::selection {
+    @apply bg-primary/20 text-primary-foreground;
+  }
+
+  /* Mobile-specific utilities */
+  .touch-action-manipulation {
+    touch-action: manipulation;
+  }
+
+  .safe-area-inset-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-inset-left {
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .safe-area-inset-right {
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Mobile input fixes */
+  input, textarea, select {
+    @apply touch-action-manipulation;
+    -webkit-appearance: none;
+    border-radius: 0;
+  }
+
+  /* Prevent zoom on input focus */
+  input[type="email"], 
+  input[type="password"], 
+  input[type="text"], 
+  input[type="tel"], 
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Mobile-friendly button sizing */
+  .mobile-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

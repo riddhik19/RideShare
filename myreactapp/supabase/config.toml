@@ -1,0 +1,13 @@
+project_id = "rulcdamqrvmkuwzugvcs"
+
+[functions]
+verify_jwt = true
+
+[functions.safety-transfer]
+verify_jwt = false
+
+[functions.respond-transfer]
+verify_jwt = true
+
+[functions.notification-processor]
+verify_jwt = false
