@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// src/components/DriverProfile.tsx
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,9 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Camera, Shield, CheckCircle, AlertCircle, Upload, User, Phone, Mail, Edit2 } from "lucide-react";
+import { Camera, Shield, CheckCircle, AlertCircle, Upload, User, Phone, Mail, Edit2, Star } from "lucide-react";
+import { submitDriverRating, getDriverRatings, getDriverRatingSummary, DriverRating, DriverRatingSummary } from "@/integrations/supabase/ratingService";
 
-// Type for profile safely
+// Profile type
 type Profile = {
   id: string;
   full_name?: string | null;
@@ -20,13 +22,11 @@ type Profile = {
   avatar_url?: string | null;
   kyc_status?: "approved" | "pending" | "rejected" | null;
   kyc_completed_at?: string | null;
-  average_rating?: number | null;
-  total_ratings?: number | null;
 };
 
 const DriverProfile: React.FC = () => {
   const { profile: rawProfile, user } = useAuth();
-  const profile: Profile = rawProfile || {} as Profile; // safe fallback
+  const profile: Profile = rawProfile || {} as Profile;
   const { toast } = useToast();
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -35,8 +35,42 @@ const DriverProfile: React.FC = () => {
     phone: profile.phone ?? "",
   });
 
+  // Ratings state
+  const [ratings, setRatings] = useState<DriverRating[]>([]);
+  const [summary, setSummary] = useState<DriverRatingSummary>({ avg_rating: 0, ratings_count: 0 });
+  const [newRating, setNewRating] = useState<number>(5);
+  const [newReview, setNewReview] = useState<string>("");
+
   const userId = user?.id;
-  if (!userId) return <div>Please log in</div>; // safety for TS
+  if (!userId) return <div>Please log in</div>;
+
+  // Fetch ratings on mount
+  useEffect(() => {
+    if (profile.id) {
+      fetchRatings();
+      fetchSummary();
+    }
+  }, [profile.id]);
+
+  const fetchRatings = async () => {
+    const data = await getDriverRatings(profile.id);
+    setRatings(data);
+  };
+
+  const fetchSummary = async () => {
+    const data = await getDriverRatingSummary(profile.id);
+    setSummary(data);
+  };
+
+  const handleSubmitRating = async () => {
+    if (!newReview.trim()) return;
+    await submitDriverRating(profile.id, newRating, newReview);
+    setNewReview("");
+    setNewRating(5);
+    fetchRatings();
+    fetchSummary();
+    toast({ title: "Thank you!", description: "Your rating has been submitted." });
+  };
 
   const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
@@ -47,21 +81,13 @@ const DriverProfile: React.FC = () => {
 
     try {
       setUploading(true);
-      const { error: uploadError } = await supabase.storage
-        .from("driver-documents")
-        .upload(filePath, file);
-
+      const { error: uploadError } = await supabase.storage.from("driver-documents").upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data } = supabase.storage
-        .from("driver-documents")
-        .getPublicUrl(filePath);
+      const { data } = supabase.storage.from("driver-documents").getPublicUrl(filePath);
       const publicUrl = data.publicUrl;
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("id", userId);
+      const { error: updateError } = await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("id", userId);
       if (updateError) throw updateError;
 
       toast({ title: "Success", description: "Profile photo updated successfully!" });
@@ -75,13 +101,10 @@ const DriverProfile: React.FC = () => {
 
   const updateProfile = async () => {
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: editData.full_name,
-          phone: editData.phone,
-        })
-        .eq("id", userId);
+      const { error } = await supabase.from("profiles").update({
+        full_name: editData.full_name,
+        phone: editData.phone,
+      }).eq("id", userId);
 
       if (error) throw error;
       setEditing(false);
@@ -109,10 +132,9 @@ const DriverProfile: React.FC = () => {
             <User className="h-5 w-5" />
             <span>Driver Profile</span>
           </CardTitle>
-          <CardDescription>Manage your profile information and verification status</CardDescription>
+          <CardDescription>Manage your profile and verification status</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Avatar Section */}
           <div className="flex items-center space-x-6">
             <div className="relative">
               <Avatar className="h-24 w-24">
@@ -128,8 +150,6 @@ const DriverProfile: React.FC = () => {
                 </label>
               </div>
             </div>
-
-            {/* Name + Badge */}
             <div className="flex-1">
               <div className="flex items-center space-x-3 mb-2">
                 <h3 className="text-xl font-semibold">{profile.full_name ?? "Not provided"}</h3>
@@ -147,11 +167,11 @@ const DriverProfile: React.FC = () => {
             </div>
           </div>
 
-          {/* Info */}
+          {/* Editable Info */}
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
-                <Label htmlFor="full_name">Full Name</Label>
+                <Label>Full Name</Label>
                 {editing ? (
                   <Input value={editData.full_name} onChange={e => setEditData(prev => ({ ...prev, full_name: e.target.value }))} />
                 ) : (
@@ -182,7 +202,6 @@ const DriverProfile: React.FC = () => {
                   </div>
                 )}
               </div>
-
               <div>
                 <Label>Account Status</Label>
                 <div className="mt-1 p-3 bg-muted rounded-md flex items-center justify-between">
@@ -213,38 +232,34 @@ const DriverProfile: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Verification Card */}
+      {/* Ratings Section */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
-            <Shield className="h-5 w-5" />
-            <span>Verification Status</span>
+            <Star className="h-5 w-5" />
+            <span>Driver Ratings</span>
           </CardTitle>
-          <CardDescription>Your account verification and KYC status</CardDescription>
+          <CardDescription>Average Rating: {summary.avg_rating} ⭐ ({summary.ratings_count} reviews)</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 border rounded-lg">
-              <div className="flex items-center space-x-3">
-                <div className={`p-2 rounded-full ${
-                  profile.kyc_status === "approved" ? "bg-green-100" :
-                  profile.kyc_status === "pending" ? "bg-yellow-100" : "bg-red-100"
-                }`}>
-                  {profile.kyc_status === "approved" ? <CheckCircle className="h-5 w-5 text-green-600" /> : <AlertCircle className="h-5 w-5 text-yellow-600" />}
-                </div>
-                <div>
-                  <h4 className="font-medium">KYC Verification</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {profile.kyc_status === "approved" ? "Your documents have been verified successfully"
-                    : profile.kyc_status === "pending" ? "Your documents are under review"
-                    : "Please complete your KYC verification"}
-                  </p>
-                </div>
-              </div>
-              <Badge className={verificationStatus.bgColor}>{verificationStatus.text}</Badge>
-            </div>
-            {profile.kyc_completed_at && <div className="text-sm text-muted-foreground">Verified on: {new Date(profile.kyc_completed_at).toLocaleDateString()}</div>}
+        <CardContent className="space-y-4">
+          {/* Submit Rating */}
+          <div className="flex items-center space-x-2">
+            <Input type="number" min={1} max={5} value={newRating} onChange={e => setNewRating(Number(e.target.value))} className="w-20" />
+            <Input type="text" placeholder="Write a review..." value={newReview} onChange={e => setNewReview(e.target.value)} />
+            <Button onClick={handleSubmitRating}>Submit</Button>
           </div>
+
+          {/* Display Ratings */}
+          {ratings.map((r, index) => (
+            <div key={index} className="p-3 border rounded-md space-y-1">
+              <div className="flex items-center space-x-2">
+                <Star className="h-4 w-4 text-yellow-500" />
+                <span>{r.rating}</span>
+              </div>
+              <p>{r.review}</p>
+              <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</p>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>
