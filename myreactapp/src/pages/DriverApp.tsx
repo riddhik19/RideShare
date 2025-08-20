@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, Plus, Car, Calendar, Users, MapPin, Clock, Edit, Trash2, Shield, CheckCircle, Star, TrendingUp, Navigation, Bell, LogOut } from 'lucide-react';
+import { ArrowLeft, Plus, Car, Calendar, Users, MapPin, Clock, Edit, Trash2, Shield, CheckCircle, Star, TrendingUp, Navigation, Bell, LogOut, Eye, Phone, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { PostRideForm } from '@/components/PostRideForm';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,6 +27,19 @@ interface Vehicle {
   color: string | null;
 }
 
+interface Profile {
+  full_name: string | null;
+  phone: string | null;
+}
+
+interface RideBooking {
+  id: string;
+  seats_booked: number;
+  status: string;
+  passenger_id: string;
+  profiles: Profile | null;
+}
+
 interface Ride {
   id: string;
   available_seats: number;
@@ -41,11 +54,7 @@ interface Ride {
   price_per_seat: number;
   to_city: string;
   vehicles?: Vehicle | null;
-}
-
-interface Profile {
-  full_name: string | null;
-  phone: string | null;
+  bookings?: RideBooking[];
 }
 
 interface BookingRide {
@@ -53,6 +62,7 @@ interface BookingRide {
   to_city: string | null;
   departure_date: string;
   departure_time: string;
+  driver_id?: string;
 }
 
 interface Booking {
@@ -96,16 +106,26 @@ export const DriverApp = () => {
   const [isPostRideOpen, setIsPostRideOpen] = useState(false);
   const [editingRide, setEditingRide] = useState<Ride | null>(null);
   const [myRides, setMyRides] = useState<Ride[]>([]);
+  const [todaysRides, setTodaysRides] = useState<Ride[]>([]);
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
   const [ratingData, setRatingData] = useState<RatingData>({ avg_rating: 0, ratings_count: 0 });
   const [stats, setStats] = useState<Stats>({ activeRides: 0, upcomingRides: 0, totalBookings: 0 });
+  
+  // State for dialog visibility and data
+  const [isActiveRidesDialogOpen, setIsActiveRidesDialogOpen] = useState(false);
+  const [isUpcomingRidesDialogOpen, setIsUpcomingRidesDialogOpen] = useState(false);
+  const [isTotalBookingsDialogOpen, setIsTotalBookingsDialogOpen] = useState(false);
+  const [upcomingRides, setUpcomingRides] = useState<Ride[]>([]);
+  const [allBookings, setAllBookings] = useState<Booking[]>([]);
 
   useEffect(() => {
     if (profile?.id) {
       fetchMyRides();
       fetchMyBookings();
       fetchRatingData();
+      fetchUpcomingRides();
+      fetchAllBookings();
     }
   }, [profile?.id]);
 
@@ -141,16 +161,14 @@ export const DriverApp = () => {
 
       setMyRides(data || []);
 
-      // Calculate stats
-      const now = new Date();
-      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const activeRides = data?.length || 0;
-      const upcomingRides = data?.filter(ride => {
-        const rideDate = new Date(ride.departure_date);
-        return rideDate >= now && rideDate <= oneWeekFromNow;
-      }).length || 0;
+      // Calculate active rides (only today's rides)
+      const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+      const todaysRides = (data || []).filter(ride => {
+        return ride.departure_date === today;
+      });
 
-      setStats(prev => ({ ...prev, activeRides, upcomingRides }));
+      setTodaysRides(todaysRides);
+      setStats(prev => ({ ...prev, activeRides: todaysRides.length }));
     } catch (error) {
       console.error('Error fetching rides:', error);
       toast({
@@ -160,6 +178,81 @@ export const DriverApp = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchUpcomingRides = async () => {
+    if (!profile?.id) return;
+    try {
+      const now = new Date();
+      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      
+      const { data, error } = await supabase
+        .from('rides')
+        .select(`
+          *,
+          vehicles (
+            car_model,
+            car_type,
+            color
+          ),
+          bookings!inner (
+            id,
+            seats_booked,
+            status,
+            passenger_id,
+            profiles:passenger_id (
+              full_name,
+              phone
+            )
+          )
+        `)
+        .eq('driver_id', profile.id)
+        .eq('is_active', true)
+        .eq('bookings.status', 'confirmed')
+        .gte('departure_date', now.toISOString().split('T')[0])
+        .lte('departure_date', oneWeekFromNow.toISOString().split('T')[0])
+        .order('departure_date', { ascending: true });
+
+      if (error) throw error;
+
+      // Type assertion to ensure proper typing
+      const typedData = (data || []) as Ride[];
+      setUpcomingRides(typedData);
+      setStats(prev => ({ ...prev, upcomingRides: typedData.length }));
+    } catch (error) {
+      console.error('Error fetching upcoming rides:', error);
+    }
+  };
+
+  const fetchAllBookings = async () => {
+    if (!profile?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          profiles:passenger_id (
+            full_name,
+            phone
+          ),
+          rides!inner (
+            from_city,
+            to_city,
+            departure_date,
+            departure_time,
+            driver_id
+          )
+        `)
+        .eq('rides.driver_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setAllBookings(data || []);
+      setStats(prev => ({ ...prev, totalBookings: (data || []).length }));
+    } catch (error) {
+      console.error('Error fetching all bookings:', error);
     }
   };
 
@@ -176,7 +269,6 @@ export const DriverApp = () => {
     try {
       console.log('Attempting to cancel ride:', rideId);
       
-      // Call the database function to cancel the ride
       const { data, error } = await supabase.rpc('cancel_ride', {
         ride_id_param: rideId
       });
@@ -195,7 +287,8 @@ export const DriverApp = () => {
         title: "Success",
         description: "Ride cancelled successfully"
       });
-      fetchMyRides(); // Refresh the rides list
+      fetchMyRides();
+      fetchUpcomingRides();
     } catch (error) {
       console.error('Error cancelling ride:', error);
       const errorMessage = error instanceof Error ? error.message : "Failed to cancel ride. Please try again.";
@@ -216,7 +309,8 @@ export const DriverApp = () => {
     setIsPostRideOpen(false);
     setEditingRide(null);
     fetchMyRides();
-    fetchRatingData(); // Refresh rating data after new rides
+    fetchUpcomingRides();
+    fetchRatingData();
   };
 
   const fetchMyBookings = async () => {
@@ -245,7 +339,6 @@ export const DriverApp = () => {
       if (error) throw error;
 
       setMyBookings(data || []);
-      setStats(prev => ({ ...prev, totalBookings: data?.length || 0 }));
     } catch (error) {
       console.error('Error fetching bookings:', error);
     }
@@ -282,6 +375,29 @@ export const DriverApp = () => {
         ))}
       </div>
     );
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-IN', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'confirmed':
+        return <Badge className="bg-green-100 text-green-800">Confirmed</Badge>;
+      case 'pending':
+        return <Badge variant="secondary">Pending</Badge>;
+      case 'cancelled':
+        return <Badge variant="destructive">Cancelled</Badge>;
+      case 'completed':
+        return <Badge className="bg-blue-100 text-blue-800">Completed</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
   };
 
   // Type guard for profile with kyc_status
@@ -352,8 +468,11 @@ export const DriverApp = () => {
 
         {/* Enhanced Stats Cards with Better Visual Hierarchy */}
         <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <Card className="border-l-4 border-l-primary hover:shadow-lg transition-all duration-200 cursor-pointer group"
-                onClick={() => navigate('/rides-management')}>
+          {/* Active Rides Card - Clickable */}
+          <Card 
+            className="border-l-4 border-l-primary hover:shadow-lg transition-all duration-200 cursor-pointer group"
+            onClick={() => setIsActiveRidesDialogOpen(true)}
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-primary group-hover:text-primary/80">Active Rides</CardTitle>
               <div className="p-2 bg-primary/10 rounded-full group-hover:bg-primary/20 transition-colors">
@@ -364,15 +483,19 @@ export const DriverApp = () => {
               <div className="text-3xl font-bold">{stats.activeRides}</div>
               <p className="text-xs text-muted-foreground flex items-center mt-1">
                 <TrendingUp className="h-3 w-3 mr-1" />
-                Click to manage rides
+                Today's rides
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-l-4 border-l-blue-500">
+          {/* Upcoming Rides Card - Clickable */}
+          <Card 
+            className="border-l-4 border-l-blue-500 hover:shadow-lg transition-all duration-200 cursor-pointer group"
+            onClick={() => setIsUpcomingRidesDialogOpen(true)}
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-blue-600">Upcoming Rides</CardTitle>
-              <div className="p-2 bg-blue-100 rounded-full">
+              <div className="p-2 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
                 <Calendar className="h-4 w-4 text-blue-600" />
               </div>
             </CardHeader>
@@ -380,15 +503,19 @@ export const DriverApp = () => {
               <div className="text-3xl font-bold">{stats.upcomingRides}</div>
               <p className="text-xs text-muted-foreground flex items-center mt-1">
                 <Clock className="h-3 w-3 mr-1" />
-                This week
+                Click to view details
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-l-4 border-l-green-500">
+          {/* Total Bookings Card - Clickable */}
+          <Card 
+            className="border-l-4 border-l-green-500 hover:shadow-lg transition-all duration-200 cursor-pointer group"
+            onClick={() => setIsTotalBookingsDialogOpen(true)}
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-green-600">Total Bookings</CardTitle>
-              <div className="p-2 bg-green-100 rounded-full">
+              <div className="p-2 bg-green-100 rounded-full group-hover:bg-green-200 transition-colors">
                 <Users className="h-4 w-4 text-green-600" />
               </div>
             </CardHeader>
@@ -396,11 +523,12 @@ export const DriverApp = () => {
               <div className="text-3xl font-bold">{stats.totalBookings}</div>
               <p className="text-xs text-muted-foreground flex items-center mt-1">
                 <CheckCircle className="h-3 w-3 mr-1" />
-                All time
+                Click to view details
               </p>
             </CardContent>
           </Card>
 
+          {/* Rating Card */}
           <Card className="border-l-4 border-l-orange-500">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-orange-600">Rating</CardTitle>
@@ -422,6 +550,238 @@ export const DriverApp = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Active Rides Dialog */}
+        <Dialog open={isActiveRidesDialogOpen} onOpenChange={setIsActiveRidesDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between">
+                Active Rides Today ({stats.activeRides})
+                <Button variant="ghost" size="sm" onClick={() => setIsActiveRidesDialogOpen(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </DialogTitle>
+              <DialogDescription>
+                Your rides scheduled for today ({new Date().toLocaleDateString()})
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {todaysRides.length > 0 ? (
+                todaysRides.map((ride) => (
+                  <Card key={ride.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">
+                            {ride.from_city} → {ride.to_city}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            {ride.vehicles?.car_model || 'N/A'} ({ride.vehicles?.car_type || 'N/A'})
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-primary">₹{ride.price_per_seat}</p>
+                          <p className="text-sm text-muted-foreground">per seat</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                        <div className="flex items-center">
+                          <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
+                          Today
+                        </div>
+                        <div className="flex items-center">
+                          <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {ride.departure_time}
+                        </div>
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {ride.available_seats} seats
+                        </div>
+                        <div className="flex items-center">
+                          <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {ride.pickup_point}
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => handleEditRide(ride)}>
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleCancelRide(ride.id)}>
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Cancel
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Car className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                  <p>No rides scheduled for today</p>
+                  <p className="text-sm">Your today's rides will appear here</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Upcoming Rides Dialog */}
+        <Dialog open={isUpcomingRidesDialogOpen} onOpenChange={setIsUpcomingRidesDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between">
+                Upcoming Rides ({stats.upcomingRides})
+                <Button variant="ghost" size="sm" onClick={() => setIsUpcomingRidesDialogOpen(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </DialogTitle>
+              <DialogDescription>
+                Rides with confirmed bookings in the next 7 days
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {upcomingRides.length > 0 ? (
+                upcomingRides.map((ride) => (
+                  <Card key={ride.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">
+                            {ride.from_city} → {ride.to_city}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">{formatDate(ride.departure_date)} at {ride.departure_time}</span>
+                          </div>
+                        </div>
+                        <Badge className="bg-blue-100 text-blue-800">
+                          {ride.bookings?.length || 0} Booking(s)
+                        </Badge>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+                        <div className="flex items-center">
+                          <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {ride.pickup_point}
+                        </div>
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {ride.available_seats} seats available
+                        </div>
+                      </div>
+
+                      {/* Show passenger details if available */}
+                      {ride.bookings && ride.bookings.length > 0 && (
+                        <div className="border-t pt-3">
+                          <h4 className="font-medium mb-2">Passengers:</h4>
+                          <div className="space-y-2">
+                            {ride.bookings.map((booking: RideBooking, index: number) => (
+                              <div key={index} className="flex items-center justify-between bg-muted/50 rounded p-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <span className="text-sm font-medium">
+                                      {booking.profiles?.full_name?.charAt(0) || 'P'}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <p className="font-medium text-sm">{booking.profiles?.full_name}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {booking.seats_booked} seat(s)
+                                    </p>
+                                  </div>
+                                </div>
+                                {booking.profiles?.phone && (
+                                  <Button size="sm" variant="outline">
+                                    <Phone className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                  <p>No upcoming rides with bookings</p>
+                  <p className="text-sm">Confirmed bookings will appear here</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Total Bookings Dialog */}
+        <Dialog open={isTotalBookingsDialogOpen} onOpenChange={setIsTotalBookingsDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between">
+                Total Bookings ({stats.totalBookings})
+                <Button variant="ghost" size="sm" onClick={() => setIsTotalBookingsDialogOpen(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </DialogTitle>
+              <DialogDescription>
+                All bookings for your rides (past and upcoming)
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {allBookings.length > 0 ? (
+                allBookings.map((booking) => (
+                  <Card key={booking.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold">
+                            {booking.rides?.from_city} → {booking.rides?.to_city}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            Passenger: {booking.profiles?.full_name || 'Unknown'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          {getStatusBadge(booking.status)}
+                          <p className="text-sm font-medium mt-1">₹{booking.total_price}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="flex items-center">
+                          <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {booking.rides && formatDate(booking.rides.departure_date)}
+                        </div>
+                        <div className="flex items-center">
+                          <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {booking.rides?.departure_time}
+                        </div>
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {booking.seats_booked} seat(s)
+                        </div>
+                        <div className="flex items-center">
+                          <Phone className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {booking.profiles?.phone || 'N/A'}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                  <p>No bookings yet</p>
+                  <p className="text-sm">Passenger bookings will appear here</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Enhanced Navigation Tabs */}
         <Tabs defaultValue="dashboard" className="w-full">
@@ -481,7 +841,7 @@ export const DriverApp = () => {
                     </div>
                   ) : myRides.length > 0 ? (
                     <div className="space-y-4">
-                      {myRides.map((ride) => (
+                      {myRides.slice(0, 3).map((ride) => (
                         <div key={ride.id} className="border rounded-lg p-4">
                           <div className="flex justify-between items-start mb-3">
                             <div>
@@ -501,7 +861,7 @@ export const DriverApp = () => {
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                             <div className="flex items-center">
                               <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
-                              {new Date(ride.departure_date).toLocaleDateString()}
+                              {formatDate(ride.departure_date)}
                             </div>
                             <div className="flex items-center">
                               <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
@@ -529,6 +889,16 @@ export const DriverApp = () => {
                           </div>
                         </div>
                       ))}
+                      {myRides.length > 3 && (
+                        <Button 
+                          variant="outline" 
+                          className="w-full"
+                          onClick={() => setIsActiveRidesDialogOpen(true)}
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View All {myRides.length} Rides
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
@@ -579,11 +949,21 @@ export const DriverApp = () => {
                             </div>
                             <div>
                               <span className="text-muted-foreground">Date:</span>{' '}
-                              {booking.rides?.departure_date && new Date(booking.rides.departure_date).toLocaleDateString()}
+                              {booking.rides?.departure_date && formatDate(booking.rides.departure_date)}
                             </div>
                           </div>
                         </div>
                       ))}
+                      {allBookings.length > 3 && (
+                        <Button 
+                          variant="outline" 
+                          className="w-full"
+                          onClick={() => setIsTotalBookingsDialogOpen(true)}
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View All {allBookings.length} Bookings
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
