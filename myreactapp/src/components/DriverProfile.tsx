@@ -9,8 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Camera, Shield, CheckCircle, AlertCircle, Upload, User, Phone, Mail, Edit2, Star } from "lucide-react";
-import { submitDriverRating, getDriverRatings, getDriverRatingSummary, DriverRating, DriverRatingSummary } from "@/integrations/supabase/ratingService";
+import { Camera, Shield, CheckCircle, AlertCircle, Upload, User, Phone, Mail, Edit2, Star, TrendingUp, Users } from "lucide-react";
+import { getDriverRatings, getDriverRatingSummary, type DriverRating, type DriverRatingSummary } from "@/integrations/supabase/ratingService";
 
 // Profile type
 type Profile = {
@@ -22,10 +22,12 @@ type Profile = {
   avatar_url?: string | null;
   kyc_status?: "approved" | "pending" | "rejected" | null;
   kyc_completed_at?: string | null;
+  average_rating?: number | null;
+  total_ratings?: number | null;
 };
 
 const DriverProfile: React.FC = () => {
-  const { profile: rawProfile, user } = useAuth();
+  const { profile: rawProfile, user, refreshProfile } = useAuth();
   const profile: Profile = rawProfile || {} as Profile;
   const { toast } = useToast();
   const [uploading, setUploading] = useState(false);
@@ -38,8 +40,7 @@ const DriverProfile: React.FC = () => {
   // Ratings state
   const [ratings, setRatings] = useState<DriverRating[]>([]);
   const [summary, setSummary] = useState<DriverRatingSummary>({ avg_rating: 0, ratings_count: 0 });
-  const [newRating, setNewRating] = useState<number>(5);
-  const [newReview, setNewReview] = useState<string>("");
+  const [loadingRatings, setLoadingRatings] = useState(true);
 
   const userId = user?.id;
   if (!userId) return <div>Please log in</div>;
@@ -52,24 +53,33 @@ const DriverProfile: React.FC = () => {
     }
   }, [profile.id]);
 
+  // Update local state when profile changes
+  useEffect(() => {
+    setEditData({
+      full_name: profile.full_name ?? "",
+      phone: profile.phone ?? "",
+    });
+  }, [profile.full_name, profile.phone]);
+
   const fetchRatings = async () => {
-    const data = await getDriverRatings(profile.id);
-    setRatings(data);
+    try {
+      setLoadingRatings(true);
+      const data = await getDriverRatings(profile.id);
+      setRatings(data);
+    } catch (error) {
+      console.error('Error fetching ratings:', error);
+    } finally {
+      setLoadingRatings(false);
+    }
   };
 
   const fetchSummary = async () => {
-    const data = await getDriverRatingSummary(profile.id);
-    setSummary(data);
-  };
-
-  const handleSubmitRating = async () => {
-    if (!newReview.trim()) return;
-    await submitDriverRating(profile.id, newRating, newReview);
-    setNewReview("");
-    setNewRating(5);
-    fetchRatings();
-    fetchSummary();
-    toast({ title: "Thank you!", description: "Your rating has been submitted." });
+    try {
+      const data = await getDriverRatingSummary(profile.id);
+      setSummary(data);
+    } catch (error) {
+      console.error('Error fetching rating summary:', error);
+    }
   };
 
   const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +100,7 @@ const DriverProfile: React.FC = () => {
       const { error: updateError } = await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("id", userId);
       if (updateError) throw updateError;
 
+      await refreshProfile();
       toast({ title: "Success", description: "Profile photo updated successfully!" });
     } catch (error) {
       console.error(error);
@@ -107,6 +118,8 @@ const DriverProfile: React.FC = () => {
       }).eq("id", userId);
 
       if (error) throw error;
+      
+      await refreshProfile();
       setEditing(false);
       toast({ title: "Success", description: "Profile updated successfully!" });
     } catch (error) {
@@ -119,6 +132,24 @@ const DriverProfile: React.FC = () => {
     if (profile.kyc_status === "approved") return { icon: <CheckCircle className="h-4 w-4" />, text: "Verified Driver", bgColor: "bg-green-100 text-green-800" };
     if (profile.kyc_status === "pending") return { icon: <AlertCircle className="h-4 w-4" />, text: "Verification Pending", bgColor: "bg-yellow-100 text-yellow-800" };
     return { icon: <AlertCircle className="h-4 w-4" />, text: "Not Verified", bgColor: "bg-red-100 text-red-800" };
+  };
+
+  const renderStars = (rating: number, size: 'sm' | 'lg' = 'sm') => {
+    const sizeClass = size === 'lg' ? 'h-6 w-6' : 'h-4 w-4';
+    return (
+      <div className="flex">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Star
+            key={star}
+            className={`${sizeClass} ${
+              star <= rating 
+                ? 'text-yellow-400 fill-yellow-400' 
+                : 'text-gray-300'
+            }`}
+          />
+        ))}
+      </div>
+    );
   };
 
   const verificationStatus = getVerificationStatus();
@@ -158,6 +189,20 @@ const DriverProfile: React.FC = () => {
                   <span className="ml-1">{verificationStatus.text}</span>
                 </Badge>
               </div>
+              
+              {/* Rating Display */}
+              {summary.ratings_count > 0 && (
+                <div className="flex items-center space-x-3 mb-2">
+                  <div className="flex items-center space-x-2">
+                    {renderStars(Math.round(summary.avg_rating))}
+                    <span className="font-medium text-lg">{summary.avg_rating.toFixed(1)}</span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    ({summary.ratings_count} reviews)
+                  </span>
+                </div>
+              )}
+              
               {uploading && (
                 <div className="flex items-center space-x-2 mt-2">
                   <Upload className="h-4 w-4 animate-spin" />
@@ -232,34 +277,131 @@ const DriverProfile: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Ratings Section */}
+      {/* Rating Statistics Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Star className="h-5 w-5" />
-            <span>Driver Ratings</span>
+            <span>Rating Overview</span>
           </CardTitle>
-          <CardDescription>Average Rating: {summary.avg_rating} ⭐ ({summary.ratings_count} reviews)</CardDescription>
+          <CardDescription>
+            Your passenger ratings and feedback summary
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Submit Rating */}
-          <div className="flex items-center space-x-2">
-            <Input type="number" min={1} max={5} value={newRating} onChange={e => setNewRating(Number(e.target.value))} className="w-20" />
-            <Input type="text" placeholder="Write a review..." value={newReview} onChange={e => setNewReview(e.target.value)} />
-            <Button onClick={handleSubmitRating}>Submit</Button>
-          </div>
-
-          {/* Display Ratings */}
-          {ratings.map((r, index) => (
-            <div key={index} className="p-3 border rounded-md space-y-1">
-              <div className="flex items-center space-x-2">
-                <Star className="h-4 w-4 text-yellow-500" />
-                <span>{r.rating}</span>
+        <CardContent>
+          {summary.ratings_count > 0 ? (
+            <div className="grid md:grid-cols-3 gap-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center mb-2">
+                  {renderStars(Math.round(summary.avg_rating), 'lg')}
+                </div>
+                <div className="text-3xl font-bold text-primary mb-1">
+                  {summary.avg_rating.toFixed(1)}
+                </div>
+                <p className="text-sm text-muted-foreground">Average Rating</p>
               </div>
-              <p>{r.review}</p>
-              <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</p>
+              
+              <div className="text-center">
+                <div className="text-3xl font-bold text-secondary mb-1">
+                  {summary.ratings_count}
+                </div>
+                <p className="text-sm text-muted-foreground">Total Reviews</p>
+              </div>
+              
+              <div className="text-center">
+                <div className="flex items-center justify-center mb-2">
+                  <TrendingUp className="h-8 w-8 text-green-600" />
+                </div>
+                <div className="text-lg font-semibold text-green-600 mb-1">
+                  {summary.avg_rating >= 4.5 ? 'Excellent' : 
+                   summary.avg_rating >= 4.0 ? 'Very Good' : 
+                   summary.avg_rating >= 3.5 ? 'Good' : 'Improving'}
+                </div>
+                <p className="text-sm text-muted-foreground">Performance</p>
+              </div>
             </div>
-          ))}
+          ) : (
+            <div className="text-center py-8">
+              <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Ratings Yet</h3>
+              <p className="text-muted-foreground">
+                Complete some rides to start receiving passenger feedback
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent Reviews Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Star className="h-5 w-5" />
+            <span>Recent Reviews</span>
+          </CardTitle>
+          <CardDescription>
+            Latest feedback from your passengers
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingRatings ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="border rounded-lg p-4 animate-pulse">
+                  <div className="h-4 bg-muted rounded w-3/4 mb-2"></div>
+                  <div className="h-3 bg-muted rounded w-1/2"></div>
+                </div>
+              ))}
+            </div>
+          ) : ratings.length > 0 ? (
+            <div className="space-y-4">
+              {ratings.slice(0, 5).map((review) => (
+                <div key={review.id} className="border rounded-lg p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Users className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">{review.passenger_name || 'Anonymous Passenger'}</h4>
+                        <div className="flex items-center gap-2">
+                          {renderStars(review.rating)}
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(review.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      {review.rating}/5 Stars
+                    </Badge>
+                  </div>
+                  
+                  {review.feedback && (
+                    <div className="bg-muted/50 rounded-md p-3 mt-3">
+                      <p className="text-sm italic">"{review.feedback}"</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {ratings.length > 5 && (
+                <div className="text-center pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Showing 5 of {ratings.length} reviews
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Reviews Yet</h3>
+              <p className="text-muted-foreground">
+                Complete rides to start receiving passenger feedback
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

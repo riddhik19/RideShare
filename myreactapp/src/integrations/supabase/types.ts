@@ -7,8 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instanciate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "12.2.3 (519615d)"
   }
@@ -89,7 +87,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "rides"
             referencedColumns: ["id"]
-          },
+          }
         ]
       }
       driver_documents: {
@@ -551,9 +549,7 @@ export type Database = {
         ]
       }
     }
-    Views: {
-      [_ in never]: never
-    }
+    Views: { [_ in never]: never }
     Functions: {
       cancel_ride: {
         Args: { ride_id_param: string }
@@ -579,6 +575,13 @@ export type Database = {
           reason: string
         }[]
       }
+      get_driver_rating_summary: {
+        Args: { target_driver: string }
+        Returns: {
+          avg_rating: number
+          ratings_count: number
+        }
+      }
     }
     Enums: {
       booking_status: "pending" | "confirmed" | "cancelled" | "completed"
@@ -586,11 +589,10 @@ export type Database = {
       user_role: "driver" | "passenger"
       verification_status: "pending" | "approved" | "rejected"
     }
-    CompositeTypes: {
-      [_ in never]: never
-    }
+    CompositeTypes: { [_ in never]: never }
   }
 }
+
 
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 

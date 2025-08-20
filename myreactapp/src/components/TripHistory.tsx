@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Calendar, MapPin, Star, Phone, Car, Clock, MessageSquare, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { submitDriverRating, getExistingRating, canRateBooking } from '@/integrations/supabase/ratingService';
 
 interface TripHistory {
   id: string;
@@ -19,6 +20,7 @@ interface TripHistory {
   passenger_notes: string;
   created_at: string;
   rides: {
+    id: string;
     from_city: string;
     to_city: string;
     departure_date: string;
@@ -37,10 +39,11 @@ interface TripHistory {
       color: string;
     } | null;
   };
-  driver_ratings?: Array<{
+  existing_rating?: {
+    id: string;
     rating: number;
     feedback: string;
-  }>;
+  } | null;
 }
 
 const TripHistory: React.FC = () => {
@@ -54,6 +57,7 @@ const TripHistory: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
   const [submittingRating, setSubmittingRating] = useState(false);
+  const [isRatingDialogOpen, setIsRatingDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -62,7 +66,6 @@ const TripHistory: React.FC = () => {
 
   const fetchTripHistory = async () => {
     if (!profile?.id) {
-      console.log('No profile ID available');
       setLoading(false);
       return;
     }
@@ -77,18 +80,9 @@ const TripHistory: React.FC = () => {
           status,
           passenger_notes,
           created_at,
-          ride_id
-        `)
-        .eq('passenger_id', profile.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Fetch ride details and ratings separately for better type safety
-      const tripsWithDetails = await Promise.all((data || []).map(async (booking) => {
-        const { data: ride } = await supabase
-          .from('rides')
-          .select(`
+          ride_id,
+          rides (
+            id,
             from_city,
             to_city,
             departure_date,
@@ -106,23 +100,31 @@ const TripHistory: React.FC = () => {
               car_type,
               color
             )
-          `)
-          .eq('id', booking.ride_id)
-          .single();
+          )
+        `)
+        .eq('passenger_id', profile.id)
+        .order('created_at', { ascending: false });
 
-        const { data: ratings } = await supabase
-          .from('driver_ratings')
-          .select('rating, feedback')
-          .eq('booking_id', booking.id);
+      if (error) throw error;
 
-        return {
-          ...booking,
-          rides: ride,
-          driver_ratings: ratings || []
-        };
-      }));
+      // Fetch existing ratings for each trip
+      const tripsWithRatings = await Promise.all(
+        (data || []).map(async (trip) => {
+          if (trip.rides && trip.status === 'confirmed') {
+            const existingRating = await getExistingRating(trip.id);
+            return {
+              ...trip,
+              existing_rating: existingRating
+            };
+          }
+          return {
+            ...trip,
+            existing_rating: null
+          };
+        })
+      );
 
-      setTrips(tripsWithDetails.filter(trip => trip.rides) as TripHistory[]);
+      setTrips(tripsWithRatings.filter(trip => trip.rides) as TripHistory[]);
     } catch (error) {
       console.error('Error fetching trip history:', error);
       toast({
@@ -135,33 +137,36 @@ const TripHistory: React.FC = () => {
     }
   };
 
-  const submitRating = async () => {
+  const handleRatingSubmit = async () => {
     if (!selectedTrip || !profile?.id) return;
 
     setSubmittingRating(true);
     try {
-      const { error } = await supabase
-        .from('driver_ratings')
-        .upsert({
-          driver_id: selectedTrip.rides.driver_id,
-          passenger_id: profile.id,
-          booking_id: selectedTrip.id,
-          rating: ratingForm.rating,
-          feedback: ratingForm.feedback
+      const result = await submitDriverRating(
+        selectedTrip.rides.driver_id,
+        selectedTrip.id,
+        ratingForm.rating,
+        ratingForm.feedback.trim()
+      );
+
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: result.message
         });
 
-      if (error) throw error;
-
-      toast({
-        title: "Rating Submitted",
-        description: "Thank you for rating your driver!"
-      });
-
-      setSelectedTrip(null);
-      setRatingForm({ rating: 5, feedback: '' });
-      fetchTripHistory(); // Refresh to show the rating
-
-    } catch (error) {
+        setIsRatingDialogOpen(false);
+        setSelectedTrip(null);
+        setRatingForm({ rating: 5, feedback: '' });
+        fetchTripHistory(); // Refresh to show the rating
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
       console.error('Error submitting rating:', error);
       toast({
         title: "Error",
@@ -173,55 +178,20 @@ const TripHistory: React.FC = () => {
     }
   };
 
-  const handleCancelBooking = async (bookingId: string) => {
-    if (!profile?.id) return;
-
-    try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('id', bookingId)
-        .eq('passenger_id', profile.id);
-
-      if (error) throw error;
-
-      toast({
-        title: "Booking Cancelled",
-        description: "Your booking has been cancelled successfully."
+  const openRatingDialog = (trip: TripHistory) => {
+    setSelectedTrip(trip);
+    
+    // Pre-populate form if rating exists
+    if (trip.existing_rating) {
+      setRatingForm({
+        rating: trip.existing_rating.rating,
+        feedback: trip.existing_rating.feedback || ''
       });
-
-      fetchTripHistory(); // Refresh the list
-    } catch (error) {
-      console.error('Error cancelling booking:', error);
-      toast({
-        title: "Error",
-        description: "Failed to cancel booking",
-        variant: "destructive"
-      });
+    } else {
+      setRatingForm({ rating: 5, feedback: '' });
     }
-  };
-
-  const downloadTripHistory = () => {
-    const csvContent = [
-      ['Date', 'From', 'To', 'Driver', 'Seats', 'Amount', 'Status'],
-      ...trips.map(trip => [
-        new Date(trip.rides.departure_date).toLocaleDateString(),
-        trip.rides.from_city,
-        trip.rides.to_city,
-        trip.rides.profiles?.full_name || 'Unknown Driver',
-        trip.seats_booked.toString(),
-        trip.total_price.toString(),
-        trip.status
-      ])
-    ].map(row => row.join(',')).join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `trip-history-${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    
+    setIsRatingDialogOpen(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -237,19 +207,27 @@ const TripHistory: React.FC = () => {
     }
   };
 
-  const renderStars = (rating: number, size: 'sm' | 'lg' = 'sm') => {
-    const sizeClass = size === 'lg' ? 'h-6 w-6' : 'h-4 w-4';
+  const renderStars = (rating: number, size: 'sm' | 'lg' = 'sm', interactive: boolean = false) => {
+    const sizeClass = size === 'lg' ? 'h-8 w-8' : 'h-4 w-4';
+    
     return (
       <div className="flex">
         {[1, 2, 3, 4, 5].map((star) => (
-          <Star
+          <button
             key={star}
-            className={`${sizeClass} ${
-              star <= rating 
-                ? 'text-yellow-400 fill-yellow-400' 
-                : 'text-gray-300'
-            }`}
-          />
+            type="button"
+            onClick={interactive ? () => setRatingForm(prev => ({ ...prev, rating: star })) : undefined}
+            className={`${interactive ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'} focus:outline-none`}
+            disabled={!interactive}
+          >
+            <Star
+              className={`${sizeClass} ${
+                star <= rating 
+                  ? 'text-yellow-400 fill-yellow-400' 
+                  : 'text-gray-300'
+              } ${interactive ? 'hover:text-yellow-200' : ''}`}
+            />
+          </button>
         ))}
       </div>
     );
@@ -290,7 +268,7 @@ const TripHistory: React.FC = () => {
           </p>
         </div>
         
-        <Button onClick={downloadTripHistory} variant="outline" size="sm">
+        <Button variant="outline" size="sm">
           <Download className="h-4 w-4 mr-2" />
           Download History
         </Button>
@@ -383,20 +361,28 @@ const TripHistory: React.FC = () => {
                 )}
 
                 {/* Rating Section */}
-                {trip.driver_ratings && trip.driver_ratings.length > 0 ? (
+                {trip.existing_rating ? (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <h4 className="font-semibold text-green-800 mb-2">Your Rating</h4>
                     <div className="flex items-center gap-2 mb-2">
-                      {renderStars(trip.driver_ratings[0].rating)}
+                      {renderStars(trip.existing_rating.rating)}
                       <span className="text-sm text-green-700">
-                        {trip.driver_ratings[0].rating}/5 stars
+                        {trip.existing_rating.rating}/5 stars
                       </span>
                     </div>
-                    {trip.driver_ratings[0].feedback && (
+                    {trip.existing_rating.feedback && (
                       <p className="text-sm text-green-700 italic">
-                        "{trip.driver_ratings[0].feedback}"
+                        "{trip.existing_rating.feedback}"
                       </p>
                     )}
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      className="mt-2"
+                      onClick={() => openRatingDialog(trip)}
+                    >
+                      Edit Rating
+                    </Button>
                   </div>
                 ) : trip.status === 'confirmed' ? (
                   <div className="flex justify-between items-center pt-2 border-t">
@@ -404,102 +390,88 @@ const TripHistory: React.FC = () => {
                       How was your trip experience?
                     </p>
                     
-                    <Dialog open={selectedTrip?.id === trip.id} onOpenChange={(open) => !open && setSelectedTrip(null)}>
-                      <DialogTrigger asChild>
-                        <Button 
-                          size="sm" 
-                          onClick={() => setSelectedTrip(trip)}
-                        >
-                          <Star className="h-4 w-4 mr-2" />
-                          Rate Driver
-                        </Button>
-                      </DialogTrigger>
-                      
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Rate Your Driver</DialogTitle>
-                        </DialogHeader>
-                        
-                        <div className="space-y-4">
-                          <div className="bg-muted/50 rounded-lg p-4">
-                            <h4 className="font-semibold mb-2">Trip Details</h4>
-                            <p className="text-sm">{trip.rides.from_city} → {trip.rides.to_city}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Driver: {trip.rides.profiles?.full_name || 'Unknown Driver'}
-                            </p>
-                          </div>
-                          
-                          <div>
-                            <Label>Rating</Label>
-                            <div className="flex items-center gap-2 mt-2">
-                              {[1, 2, 3, 4, 5].map((star) => (
-                                <button
-                                  key={star}
-                                  onClick={() => setRatingForm(prev => ({ ...prev, rating: star }))}
-                                  className="focus:outline-none"
-                                >
-                                  <Star
-                                    className={`h-8 w-8 cursor-pointer transition-colors ${
-                                      star <= ratingForm.rating 
-                                        ? 'text-yellow-400 fill-yellow-400' 
-                                        : 'text-gray-300 hover:text-yellow-200'
-                                    }`}
-                                  />
-                                </button>
-                              ))}
-                              <span className="ml-2 text-sm text-muted-foreground">
-                                {ratingForm.rating}/5 stars
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <div>
-                            <Label htmlFor="feedback">Feedback (Optional)</Label>
-                            <Textarea
-                              id="feedback"
-                              placeholder="Share your experience with other passengers..."
-                              value={ratingForm.feedback}
-                              onChange={(e) => setRatingForm(prev => ({ 
-                                ...prev, 
-                                feedback: e.target.value 
-                              }))}
-                            />
-                          </div>
-                          
-                          <Button 
-                            onClick={submitRating} 
-                            disabled={submittingRating}
-                            className="w-full"
-                          >
-                            {submittingRating ? 'Submitting...' : 'Submit Rating'}
-                          </Button>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
+                    <Button 
+                      size="sm" 
+                      onClick={() => openRatingDialog(trip)}
+                    >
+                      <Star className="h-4 w-4 mr-2" />
+                      Rate Driver
+                    </Button>
                   </div>
                 ) : null}
-
-                {/* Action Buttons for Active/Upcoming Trips */}
-                {trip.status === 'pending' && (
-                  <div className="flex gap-2 pt-4 border-t">
-                    <Button variant="outline" size="sm">
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      Contact Driver
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleCancelBooking(trip.id)}
-                    >
-                      Cancel Booking
-                    </Button>
-                  </div>
-                )}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Rating Dialog */}
+      <Dialog open={isRatingDialogOpen} onOpenChange={setIsRatingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedTrip?.existing_rating ? 'Edit Your Rating' : 'Rate Your Driver'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedTrip && (
+            <div className="space-y-4">
+              <div className="bg-muted/50 rounded-lg p-4">
+                <h4 className="font-semibold mb-2">Trip Details</h4>
+                <p className="text-sm">{selectedTrip.rides.from_city} → {selectedTrip.rides.to_city}</p>
+                <p className="text-sm text-muted-foreground">
+                  Driver: {selectedTrip.rides.profiles?.full_name || 'Unknown Driver'}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Date: {formatDate(selectedTrip.rides.departure_date)}
+                </p>
+              </div>
+              
+              <div>
+                <Label>Rating</Label>
+                <div className="flex items-center gap-2 mt-2">
+                  {renderStars(ratingForm.rating, 'lg', true)}
+                  <span className="ml-2 text-sm text-muted-foreground">
+                    {ratingForm.rating}/5 stars
+                  </span>
+                </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="feedback">Feedback (Optional)</Label>
+                <Textarea
+                  id="feedback"
+                  placeholder="Share your experience with other passengers..."
+                  value={ratingForm.feedback}
+                  onChange={(e) => setRatingForm(prev => ({ 
+                    ...prev, 
+                    feedback: e.target.value 
+                  }))}
+                  className="mt-1"
+                />
+              </div>
+              
+              <div className="flex gap-2 pt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsRatingDialogOpen(false)}
+                  disabled={submittingRating}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleRatingSubmit} 
+                  disabled={submittingRating}
+                  className="flex-1"
+                >
+                  {submittingRating ? 'Submitting...' : (selectedTrip.existing_rating ? 'Update Rating' : 'Submit Rating')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

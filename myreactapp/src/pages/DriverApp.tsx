@@ -18,32 +18,109 @@ import DriverRatingFeedback from '@/components/DriverRatingFeedback';
 import LiveLocationSharing from '@/components/LiveLocationSharing';
 import DriverProfile from '@/components/DriverProfile';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getDriverRatingSummary } from '@/integrations/supabase/ratingService';
+
+// Type definitions
+interface Vehicle {
+  car_model: string | null;
+  car_type: string | null;
+  color: string | null;
+}
+
+interface Ride {
+  id: string;
+  available_seats: number;
+  created_at: string;
+  departure_date: string;
+  departure_time: string;
+  driver_id: string;
+  from_city: string;
+  is_active: boolean;
+  notes: string | null;
+  pickup_point: string;
+  price_per_seat: number;
+  to_city: string;
+  vehicles?: Vehicle | null;
+}
+
+interface Profile {
+  full_name: string | null;
+  phone: string | null;
+}
+
+interface BookingRide {
+  from_city: string | null;
+  to_city: string | null;
+  departure_date: string;
+  departure_time: string;
+}
+
+interface Booking {
+  id: string;
+  bulk_booking_id: string | null;
+  created_at: string;
+  is_bulk_booking: boolean | null;
+  notif_15min_sent: boolean | null;
+  notif_15min_sent_at: string | null;
+  notif_1hr_sent: boolean | null;
+  seats_booked: number;
+  status: string;
+  total_price: number;
+  profiles?: Profile | null;
+  rides?: BookingRide | null;
+}
+
+interface ExtendedProfile {
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  kyc_status?: string;
+}
+
+interface RatingData {
+  avg_rating: number;
+  ratings_count: number;
+}
+
+interface Stats {
+  activeRides: number;
+  upcomingRides: number;
+  totalBookings: number;
+}
 
 export const DriverApp = () => {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  
   const [isPostRideOpen, setIsPostRideOpen] = useState(false);
-  const [editingRide, setEditingRide] = useState(null);
-  const [myRides, setMyRides] = useState([]);
-  const [myBookings, setMyBookings] = useState([]);
+  const [editingRide, setEditingRide] = useState<Ride | null>(null);
+  const [myRides, setMyRides] = useState<Ride[]>([]);
+  const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState({
-    activeRides: 0,
-    upcomingRides: 0,
-    totalBookings: 0
-  });
+  const [ratingData, setRatingData] = useState<RatingData>({ avg_rating: 0, ratings_count: 0 });
+  const [stats, setStats] = useState<Stats>({ activeRides: 0, upcomingRides: 0, totalBookings: 0 });
 
   useEffect(() => {
     if (profile?.id) {
       fetchMyRides();
       fetchMyBookings();
+      fetchRatingData();
     }
   }, [profile?.id]);
 
+  const fetchRatingData = async () => {
+    if (!profile?.id) return;
+    try {
+      const summary = await getDriverRatingSummary(profile.id);
+      setRatingData(summary);
+    } catch (error) {
+      console.error('Error fetching rating data:', error);
+    }
+  };
+
   const fetchMyRides = async () => {
     if (!profile?.id) return;
-    
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -61,25 +138,19 @@ export const DriverApp = () => {
         .order('departure_date', { ascending: true });
 
       if (error) throw error;
-      
+
       setMyRides(data || []);
-      
+
       // Calculate stats
       const now = new Date();
       const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      
       const activeRides = data?.length || 0;
       const upcomingRides = data?.filter(ride => {
         const rideDate = new Date(ride.departure_date);
         return rideDate >= now && rideDate <= oneWeekFromNow;
       }).length || 0;
-      
-      setStats(prev => ({
-        ...prev,
-        activeRides,
-        upcomingRides
-      }));
-      
+
+      setStats(prev => ({ ...prev, activeRides, upcomingRides }));
     } catch (error) {
       console.error('Error fetching rides:', error);
       toast({
@@ -92,7 +163,7 @@ export const DriverApp = () => {
     }
   };
 
-  const handleCancelRide = async (rideId) => {
+  const handleCancelRide = async (rideId: string) => {
     if (!profile?.id) {
       toast({
         title: "Error",
@@ -120,24 +191,23 @@ export const DriverApp = () => {
       }
 
       console.log('Ride cancelled successfully');
-
       toast({
         title: "Success",
         description: "Ride cancelled successfully"
       });
-
       fetchMyRides(); // Refresh the rides list
     } catch (error) {
       console.error('Error cancelling ride:', error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to cancel ride. Please try again.";
       toast({
         title: "Error",
-        description: error.message || "Failed to cancel ride. Please try again.",
+        description: errorMessage,
         variant: "destructive"
       });
     }
   };
 
-  const handleEditRide = (ride) => {
+  const handleEditRide = (ride: Ride) => {
     setEditingRide(ride);
     setIsPostRideOpen(true);
   };
@@ -146,6 +216,7 @@ export const DriverApp = () => {
     setIsPostRideOpen(false);
     setEditingRide(null);
     fetchMyRides();
+    fetchRatingData(); // Refresh rating data after new rides
   };
 
   const fetchMyBookings = async () => {
@@ -172,13 +243,9 @@ export const DriverApp = () => {
         .limit(10);
 
       if (error) throw error;
-      
+
       setMyBookings(data || []);
-      setStats(prev => ({
-        ...prev,
-        totalBookings: data?.length || 0
-      }));
-      
+      setStats(prev => ({ ...prev, totalBookings: data?.length || 0 }));
     } catch (error) {
       console.error('Error fetching bookings:', error);
     }
@@ -202,6 +269,23 @@ export const DriverApp = () => {
     }
   };
 
+  const renderStars = (rating: number) => {
+    return (
+      <div className="flex">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Star
+            key={star}
+            className={`h-4 w-4 ${
+              star <= rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'
+            }`}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  // Type guard for profile with kyc_status
+  const profileWithKyc = profile as ExtendedProfile & { kyc_status?: string };
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -214,14 +298,16 @@ export const DriverApp = () => {
             </Button>
             <div className="flex items-center space-x-4">
               <Avatar className="h-12 w-12">
-                <AvatarImage src={profile?.avatar_url} alt={profile?.full_name} />
-                <AvatarFallback>{profile?.full_name?.charAt(0)}</AvatarFallback>
+                <AvatarImage 
+                  src={profile?.avatar_url || ''} 
+                  alt={profile?.full_name || 'User'} 
+                />
+                <AvatarFallback>{profile?.full_name?.charAt(0) || 'U'}</AvatarFallback>
               </Avatar>
               <div>
                 <div className="flex items-center space-x-2">
                   <h1 className="text-3xl font-bold">Driver Dashboard</h1>
-                  {/* @ts-ignore - kyc_status exists in database but not in generated types yet */}
-                  {profile?.kyc_status === 'approved' && (
+                  {profileWithKyc?.kyc_status === 'approved' && (
                     <Badge variant="secondary" className="bg-green-100 text-green-800 hover:bg-green-100">
                       <CheckCircle className="h-3 w-3 mr-1" />
                       Verified
@@ -230,20 +316,18 @@ export const DriverApp = () => {
                 </div>
                 <div className="flex items-center space-x-4 text-muted-foreground">
                   <span>Welcome back, {profile?.full_name}</span>
-                  {/* @ts-ignore - rating fields exist in database but not in generated types yet */}
-                  {profile?.average_rating && (
+                  {ratingData.ratings_count > 0 && (
                     <div className="flex items-center space-x-1">
                       <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                      {/* @ts-ignore */}
-                      <span className="font-medium">{profile.average_rating}</span>
-                      {/* @ts-ignore */}
-                      <span className="text-sm">({profile.total_ratings} reviews)</span>
+                      <span className="font-medium">{ratingData.avg_rating.toFixed(1)}</span>
+                      <span className="text-sm">({ratingData.ratings_count} reviews)</span>
                     </div>
                   )}
                 </div>
               </div>
             </div>
           </div>
+
           <div className="flex items-center space-x-4">
             <NotificationSystem />
             <Dialog open={isPostRideOpen} onOpenChange={setIsPostRideOpen}>
@@ -260,10 +344,7 @@ export const DriverApp = () => {
                     {editingRide ? 'Update your ride details' : 'Create a ride listing for passengers to book'}
                   </DialogDescription>
                 </DialogHeader>
-                <PostRideForm 
-                  onSuccess={handleRidePosted} 
-                  editData={editingRide}
-                />
+                <PostRideForm onSuccess={handleRidePosted} editData={editingRide} />
               </DialogContent>
             </Dialog>
           </div>
@@ -271,10 +352,8 @@ export const DriverApp = () => {
 
         {/* Enhanced Stats Cards with Better Visual Hierarchy */}
         <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <Card 
-            className="border-l-4 border-l-primary hover:shadow-lg transition-all duration-200 cursor-pointer group"
-            onClick={() => navigate('/rides-management')}
-          >
+          <Card className="border-l-4 border-l-primary hover:shadow-lg transition-all duration-200 cursor-pointer group"
+                onClick={() => navigate('/rides-management')}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-primary group-hover:text-primary/80">Active Rides</CardTitle>
               <div className="p-2 bg-primary/10 rounded-full group-hover:bg-primary/20 transition-colors">
@@ -289,7 +368,7 @@ export const DriverApp = () => {
               </p>
             </CardContent>
           </Card>
-          
+
           <Card className="border-l-4 border-l-blue-500">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-blue-600">Upcoming Rides</CardTitle>
@@ -305,7 +384,7 @@ export const DriverApp = () => {
               </p>
             </CardContent>
           </Card>
-          
+
           <Card className="border-l-4 border-l-green-500">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-green-600">Total Bookings</CardTitle>
@@ -330,14 +409,15 @@ export const DriverApp = () => {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">
-                {/* @ts-ignore - rating fields exist in database but not in generated types yet */}
-                {profile?.average_rating ? Number(profile.average_rating).toFixed(1) : '0.0'}
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-3xl font-bold">
+                  {ratingData.ratings_count > 0 ? ratingData.avg_rating.toFixed(1) : '0.0'}
+                </div>
+                {ratingData.ratings_count > 0 && renderStars(Math.round(ratingData.avg_rating))}
               </div>
-              <p className="text-xs text-muted-foreground flex items-center mt-1">
+              <p className="text-xs text-muted-foreground flex items-center">
                 <Users className="h-3 w-3 mr-1" />
-                {/* @ts-ignore */}
-                {profile?.total_ratings || 0} reviews
+                {ratingData.ratings_count} reviews
               </p>
             </CardContent>
           </Card>
@@ -383,7 +463,7 @@ export const DriverApp = () => {
               <span className="hidden sm:inline">Logout</span>
             </TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="dashboard" className="space-y-6">
             <div className="grid md:grid-cols-2 gap-6">
               <Card>
@@ -409,7 +489,7 @@ export const DriverApp = () => {
                                 {ride.from_city} → {ride.to_city}
                               </h3>
                               <p className="text-sm text-muted-foreground">
-                                {ride.vehicles?.car_model} ({ride.vehicles?.car_type})
+                                {ride.vehicles?.car_model || 'N/A'} ({ride.vehicles?.car_type || 'N/A'})
                               </p>
                             </div>
                             <div className="text-right">
@@ -438,19 +518,11 @@ export const DriverApp = () => {
                           </div>
                           
                           <div className="flex gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleEditRide(ride)}
-                            >
+                            <Button variant="outline" size="sm" onClick={() => handleEditRide(ride)}>
                               <Edit className="h-4 w-4 mr-2" />
                               Edit
                             </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleCancelRide(ride.id)}
-                            >
+                            <Button variant="outline" size="sm" onClick={() => handleCancelRide(ride.id)}>
                               <Trash2 className="h-4 w-4 mr-2" />
                               Cancel
                             </Button>
@@ -483,10 +555,10 @@ export const DriverApp = () => {
                           <div className="flex justify-between items-start mb-2">
                             <div>
                               <h4 className="font-semibold">
-                                {booking.profiles?.full_name}
+                                {booking.profiles?.full_name || 'Unknown User'}
                               </h4>
                               <p className="text-sm text-muted-foreground">
-                                {booking.rides?.from_city} → {booking.rides?.to_city}
+                                {booking.rides?.from_city || 'N/A'} → {booking.rides?.to_city || 'N/A'}
                               </p>
                             </div>
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
@@ -506,7 +578,8 @@ export const DriverApp = () => {
                               <span className="text-muted-foreground">Amount:</span> ₹{booking.total_price}
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Date:</span> {booking.rides && new Date(booking.rides.departure_date).toLocaleDateString()}
+                              <span className="text-muted-foreground">Date:</span>{' '}
+                              {booking.rides?.departure_date && new Date(booking.rides.departure_date).toLocaleDateString()}
                             </div>
                           </div>
                         </div>
@@ -523,27 +596,27 @@ export const DriverApp = () => {
               </Card>
             </div>
           </TabsContent>
-          
+
           <TabsContent value="trips" className="space-y-6">
             <TripManagement />
           </TabsContent>
-          
+
           <TabsContent value="earnings" className="space-y-6">
             <DailyEarnings />
           </TabsContent>
-          
+
           <TabsContent value="ratings" className="space-y-6">
             <DriverRatingFeedback />
           </TabsContent>
-          
+
           <TabsContent value="location" className="space-y-6">
             <LiveLocationSharing />
           </TabsContent>
-          
+
           <TabsContent value="kyc" className="space-y-6">
             <KYCDocumentUpload />
           </TabsContent>
-          
+
           <TabsContent value="profile" className="space-y-6">
             <DriverProfile />
           </TabsContent>
