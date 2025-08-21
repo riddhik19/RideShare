@@ -12,7 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Search, MapPin, Calendar, Clock, Users, Star, Phone, Car, Filter } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { SafetyTransferNotification } from '@/components/SafetyTransferNotification';
-import { SeatVisualization } from '@/components/SeatVisualization';
+import { EnhancedSeatVisualization } from '@/components/EnhancedSeatVisualization';
 import { CitySearch } from '@/components/ui/city-search';
 
 interface Ride {
@@ -23,14 +23,15 @@ interface Ride {
   departure_time: string;
   pickup_point: string;
   available_seats: number;
-  price_per_seat: number;
+  base_price: number;
+  price_per_seat?: number;
   notes: string | null;
   created_at?: string;
   driver_id?: string;
   is_active?: boolean;
-  price?: number;
   status?: string;
   updated_at?: string;
+  total_seats?: number;
   vehicles: {
     car_model: string | null;
     car_type: string | null;
@@ -43,12 +44,25 @@ interface Ride {
     average_rating: number | null;
     total_ratings: number | null;
   };
+  booked_seats?: Array<{
+    seat_id: string;
+    passenger_name: string;
+  }>;
 }
 
-// Add this interface for user bookings
 interface UserBooking {
   ride_id: string;
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+  selected_seats?: string[];
+}
+
+interface BookingData {
+  ride_id: string;
+  status: string;
+  selected_seats?: string[];
+  profiles?: {
+    full_name: string;
+  };
 }
 
 const RideSearchBooking: React.FC = () => {
@@ -63,22 +77,21 @@ const RideSearchBooking: React.FC = () => {
   });
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
   const [bookingForm, setBookingForm] = useState({
-    seats_booked: 1,
     passenger_name: '',
     passenger_phone: '',
     passenger_email: '',
     emergency_contact_name: '',
     emergency_contact_phone: '',
     passenger_notes: '',
-    preferred_seat: '',
     gender: '',
-    age: ''
+    age: '',
+    selected_seats: [] as string[],
+    total_price: 0
   });
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(false);
   const [transferRequest, setTransferRequest] = useState<any>(null);
   const [showTransferNotification, setShowTransferNotification] = useState(false);
-  // Fix the userBookings state with proper typing
   const [userBookings, setUserBookings] = useState<UserBooking[]>([]);
 
   useEffect(() => {
@@ -98,15 +111,24 @@ const RideSearchBooking: React.FC = () => {
     }
     
     try {
+      // First try to fetch without selected_seats
       const { data, error } = await supabase
         .from('bookings')
         .select('ride_id, status')
         .eq('passenger_id', profile.id)
         .in('status', ['pending', 'confirmed']);
 
-      if (error) throw error;
-      // Type the data properly
-      setUserBookings(data as UserBooking[] || []);
+      if (error) {
+        throw error;
+      }
+      
+      const bookings = (data || []).map(booking => ({
+        ride_id: booking.ride_id,
+        status: booking.status as 'pending' | 'confirmed' | 'cancelled' | 'completed',
+        selected_seats: [] // Initialize as empty array
+      }));
+      
+      setUserBookings(bookings);
     } catch (error) {
       console.error('Error fetching bookings:', error);
       toast({
@@ -115,6 +137,35 @@ const RideSearchBooking: React.FC = () => {
         variant: "destructive"
       });
     }
+  };
+
+  const fetchBookedSeats = async (rideId: string) => {
+    try {
+      // Try to fetch booked seats with a simpler query
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('passenger_id')
+        .eq('ride_id', rideId)
+        .in('status', ['confirmed', 'pending']);
+
+      if (error) {
+        throw error;
+      }
+
+      // For now, return empty array as we don't have seat selection implemented
+      // You'll need to implement proper seat tracking in your database
+      return [];
+    } catch (error) {
+      console.error('Error fetching booked seats:', error);
+      return [];
+    }
+  };
+
+  const convertBookedSeats = (bookedSeats: Array<{ seat_id: string; passenger_name: string }>) => {
+    return bookedSeats.map(seat => ({
+      seatId: seat.seat_id,
+      passengerName: seat.passenger_name
+    }));
   };
 
   const searchRides = async () => {
@@ -142,7 +193,6 @@ const RideSearchBooking: React.FC = () => {
         .gte('departure_date', new Date().toISOString().split('T')[0])
         .order('departure_date', { ascending: true });
 
-      // Apply filters
       if (searchFilters.from_city) {
         query = query.ilike('from_city', `%${searchFilters.from_city}%`);
       }
@@ -159,7 +209,19 @@ const RideSearchBooking: React.FC = () => {
       const { data, error } = await query;
 
       if (error) throw error;
-      setRides(data || []);
+      
+      const ridesWithBookedSeats = await Promise.all(
+        (data || []).map(async (ride: any) => {
+          const bookedSeats = await fetchBookedSeats(ride.id);
+          return {
+            ...ride,
+            base_price: ride.price_per_seat || 100, // Use price_per_seat if base_price doesn't exist
+            booked_seats: bookedSeats
+          };
+        })
+      );
+      
+      setRides(ridesWithBookedSeats);
     } catch (error) {
       console.error('Error searching rides:', error);
       toast({
@@ -172,10 +234,17 @@ const RideSearchBooking: React.FC = () => {
     }
   };
 
+  const handleSeatSelection = (selectedSeats: string[], totalPrice: number) => {
+    setBookingForm(prev => ({
+      ...prev,
+      selected_seats: selectedSeats,
+      total_price: totalPrice
+    }));
+  };
+
   const bookRide = async () => {
     if (!selectedRide || !profile) return;
 
-    // Validate required fields
     if (!bookingForm.gender || !bookingForm.age || !bookingForm.passenger_name || !bookingForm.passenger_phone) {
       toast({
         title: "Missing Information",
@@ -185,36 +254,40 @@ const RideSearchBooking: React.FC = () => {
       return;
     }
 
-     // Check if user has already booked this ride with active status
-     const existingBooking = userBookings.find(booking => 
-       booking.ride_id === selectedRide.id && 
-       ['pending', 'confirmed'].includes(booking.status)
-     );
+    if (bookingForm.selected_seats.length === 0) {
+      toast({
+        title: "No Seats Selected",
+        description: "Please select at least one seat",
+        variant: "destructive"
+      });
+      return;
+    }
 
-     if (existingBooking) {
-       toast({
-         title: "Already Booked",
-         description: "You have an active booking for this ride. Cancel it first to book again.",
-         variant: "destructive"
-       });
-       return;
-     }
+    const existingBooking = userBookings.find(booking => 
+      booking.ride_id === selectedRide.id && 
+      ['pending', 'confirmed'].includes(booking.status)
+    );
 
-     // Check if enough seats are available
-     if (bookingForm.seats_booked > selectedRide.available_seats) {
-       toast({
-         title: "Not Enough Seats",
-         description: `Only ${selectedRide.available_seats} seat(s) available. Please select fewer seats.`,
-         variant: "destructive"
-       });
-       return;
-     }
+    if (existingBooking) {
+      toast({
+        title: "Already Booked",
+        description: "You have an active booking for this ride. Cancel it first to book again.",
+        variant: "destructive"
+      });
+      return;
+    }
 
-     setBooking(true);
-     try {
-      const totalPrice = bookingForm.seats_booked * selectedRide.price_per_seat;
+    if (bookingForm.selected_seats.length > selectedRide.available_seats) {
+      toast({
+        title: "Not Enough Seats",
+        description: `Only ${selectedRide.available_seats} seat(s) available. Please select fewer seats.`,
+        variant: "destructive"
+      });
+      return;
+    }
 
-      // First, update user profile with gender and age if not already set
+    setBooking(true);
+    try {
       await supabase
         .from('profiles')
         .update({
@@ -223,16 +296,14 @@ const RideSearchBooking: React.FC = () => {
         })
         .eq('id', profile.id);
 
-      // Create the booking
       const { data: newBooking, error } = await supabase
         .from('bookings')
         .insert({
           ride_id: selectedRide.id,
           passenger_id: profile.id,
-          seats_booked: bookingForm.seats_booked,
-          total_price: totalPrice,
+          seats_booked: bookingForm.selected_seats.length,
+          total_price: bookingForm.total_price,
           passenger_notes: bookingForm.passenger_notes,
-          preferred_seat: bookingForm.preferred_seat,
           status: 'pending'
         })
         .select()
@@ -245,14 +316,12 @@ const RideSearchBooking: React.FC = () => {
 
       console.log('✅ Booking created successfully:', newBooking);
 
-      // Update available seats
-      const newAvailableSeats = selectedRide.available_seats - bookingForm.seats_booked;
+      const newAvailableSeats = selectedRide.available_seats - bookingForm.selected_seats.length;
       await supabase
         .from('rides')
         .update({ available_seats: newAvailableSeats })
         .eq('id', selectedRide.id);
 
-      // Trigger safety transfer for female passengers
       if (bookingForm.gender === 'female') {
         try {
           const { data: transferData, error: transferError } = await supabase.functions.invoke('safety-transfer', {
@@ -264,7 +333,7 @@ const RideSearchBooking: React.FC = () => {
               routeTo: selectedRide.to_city,
               departureDate: selectedRide.departure_date,
               departureTime: selectedRide.departure_time,
-              preferredSeat: bookingForm.preferred_seat,
+              preferredSeat: bookingForm.selected_seats[0],
               originalVehicleBrand: selectedRide.vehicles?.car_type,
               originalVehicleSegment: selectedRide.vehicles?.car_type
             }
@@ -279,18 +348,15 @@ const RideSearchBooking: React.FC = () => {
         }
       }
 
-      // Send booking confirmation emails
-      console.log('🚀 Starting email notifications...');
+      const bookingReference = `RS${newBooking.id.substring(0, 8).toUpperCase()}`;
       
-      // Use Promise.allSettled to ensure both emails are attempted even if one fails
       const emailPromises = [
-        // Passenger email
         supabase.functions.invoke('send-booking-confirmation', {
           body: {
             type: 'passenger',
             booking: {
               id: newBooking.id,
-              booking_reference: `RS${newBooking.id.substring(0, 8).toUpperCase()}`,
+              booking_reference: bookingReference,
               passenger_name: profile.full_name || bookingForm.passenger_name,
               passenger_email: profile.email || bookingForm.passenger_email,
               passenger_phone: profile.phone || bookingForm.passenger_phone,
@@ -313,24 +379,23 @@ const RideSearchBooking: React.FC = () => {
                 departure_time: selectedRide.departure_time,
                 estimated_duration: '2-3 hours',
                 fare_breakdown: {
-                  base_fare: totalPrice * 0.9,
-                  taxes: totalPrice * 0.1,
-                  total: totalPrice
+                  base_fare: bookingForm.total_price * 0.9,
+                  taxes: bookingForm.total_price * 0.1,
+                  total: bookingForm.total_price
                 }
               },
-              seats_booked: bookingForm.seats_booked,
+              seats_booked: bookingForm.selected_seats.length,
               passenger_rating: 0
             }
           }
         }),
         
-        // Driver email
         supabase.functions.invoke('send-booking-confirmation', {
           body: {
             type: 'driver',
             booking: {
               id: newBooking.id,
-              booking_reference: `RS${newBooking.id.substring(0, 8).toUpperCase()}`,
+              booking_reference: bookingReference,
               passenger_name: profile.full_name || bookingForm.passenger_name,
               passenger_email: profile.email || bookingForm.passenger_email,
               passenger_phone: profile.phone || bookingForm.passenger_phone,
@@ -353,60 +418,48 @@ const RideSearchBooking: React.FC = () => {
                 departure_time: selectedRide.departure_time,
                 estimated_duration: '2-3 hours',
                 fare_breakdown: {
-                  base_fare: totalPrice * 0.9,
-                  taxes: totalPrice * 0.1,
-                  total: totalPrice
+                  base_fare: bookingForm.total_price * 0.9,
+                  taxes: bookingForm.total_price * 0.1,
+                  total: bookingForm.total_price
                 }
               },
-              seats_booked: bookingForm.seats_booked,
+              seats_booked: bookingForm.selected_seats.length,
               passenger_rating: 0
             }
           }
         })
       ];
 
-      // Execute email and SMS sending in parallel
-      const bookingReference = `RS${newBooking.id.substring(0, 8).toUpperCase()}`;
       const smsPromises = [];
       
-      // Send SMS to passenger if phone number exists
       if (bookingForm.passenger_phone) {
-        console.log(`📱 Preparing passenger SMS to: ${bookingForm.passenger_phone}`);
         smsPromises.push(
           supabase.functions.invoke('send-sms-notification', {
             body: {
               to: bookingForm.passenger_phone,
-              message: `🚗 Booking Confirmed! Trip: ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)} at ${selectedRide.departure_time}. Driver: ${selectedRide.profiles.full_name || 'Driver'}. Ref: ${bookingReference}`,
+              message: `🚗 Booking Confirmed! Trip: ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)} at ${selectedRide.departure_time}. Seats: ${bookingForm.selected_seats.join(', ')}. Ref: ${bookingReference}`,
               type: 'booking_confirmation'
             }
           })
         );
-      } else {
-        console.warn('❌ No passenger phone number provided');
       }
       
-      // Send SMS to driver if phone number exists
       if (selectedRide.profiles?.phone) {
-        console.log(`📱 Preparing driver SMS to: ${selectedRide.profiles.phone}`);
         smsPromises.push(
           supabase.functions.invoke('send-sms-notification', {
             body: {
               to: selectedRide.profiles.phone,
-              message: `🚗 New Booking Alert! ${bookingForm.passenger_name} booked ${bookingForm.seats_booked} seat(s) for ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)}. Ref: ${bookingReference}`,
+              message: `🚗 New Booking Alert! ${bookingForm.passenger_name} booked seats ${bookingForm.selected_seats.join(', ')} for ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)}. Ref: ${bookingReference}`,
               type: 'booking_confirmation'
             }
           })
         );
-      } else {
-        console.warn('❌ No driver phone number available');
       }
 
-      // Execute email and SMS sending in parallel and handle results
       const allPromises = [...emailPromises, ...smsPromises];
       Promise.allSettled(allPromises).then(results => {
         results.forEach((result, index) => {
           if (index < emailPromises.length) {
-            // Email results
             const emailType = index === 0 ? 'passenger' : 'driver';
             if (result.status === 'fulfilled') {
               console.log(`✅ ${emailType} email sent successfully:`, result.value);
@@ -414,7 +467,6 @@ const RideSearchBooking: React.FC = () => {
               console.error(`❌ ${emailType} email failed:`, result.reason);
             }
           } else {
-            // SMS results
             const smsIndex = index - emailPromises.length;
             const smsType = bookingForm.passenger_phone && smsIndex === 0 ? 'passenger' : 'driver';
             if (result.status === 'fulfilled') {
@@ -425,40 +477,31 @@ const RideSearchBooking: React.FC = () => {
           }
         });
         
-        // Show success message based on what was sent
-        const emailsSent = emailPromises.length;
-        const smsSent = smsPromises.length;
-        const description = smsSent > 0 
-          ? `Your booking for ${bookingForm.seats_booked} seat(s) has been submitted for approval. Confirmation emails and SMS sent!`
-          : `Your booking for ${bookingForm.seats_booked} seat(s) has been submitted for approval. Confirmation emails sent!`;
+        const description = smsPromises.length > 0 
+          ? `Your booking for seats ${bookingForm.selected_seats.join(', ')} has been submitted for approval. Confirmation emails and SMS sent!`
+          : `Your booking for seats ${bookingForm.selected_seats.join(', ')} has been submitted for approval. Confirmation emails sent!`;
           
         toast({
           title: "Booking Successful!",
           description
         });
-      }).catch(error => {
-        console.error('❌ Notification sending error:', error);
-        toast({
-          title: "Booking Successful!",
-          description: `Your booking for ${bookingForm.seats_booked} seat(s) has been submitted for approval.`
-        });
       });
 
       setSelectedRide(null);
       setBookingForm({ 
-        seats_booked: 1, 
         passenger_name: '',
         passenger_phone: '',
         passenger_email: '',
         emergency_contact_name: '',
         emergency_contact_phone: '',
         passenger_notes: '', 
-        preferred_seat: '', 
         gender: '', 
-        age: '' 
+        age: '',
+        selected_seats: [],
+        total_price: 0
       });
-      fetchUserBookings(); // Refresh user bookings
-      searchRides(); // Refresh results
+      fetchUserBookings();
+      searchRides();
 
     } catch (error) {
       console.error('Error booking ride:', error);
@@ -477,7 +520,6 @@ const RideSearchBooking: React.FC = () => {
     setTransferRequest(null);
     
     if (response === 'accepted') {
-      // Refresh the rides list to show updated availability
       searchRides();
     }
   };
@@ -517,9 +559,16 @@ const RideSearchBooking: React.FC = () => {
     });
   };
 
+  const getMinPriceForRide = (ride: Ride) => {
+    return ride.base_price;
+  };
+
+  const getMaxPriceForRide = (ride: Ride) => {
+    return ride.base_price + 100;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Safety Transfer Notification */}
       {showTransferNotification && transferRequest && (
         <SafetyTransferNotification
           transferRequest={transferRequest}
@@ -535,7 +584,6 @@ const RideSearchBooking: React.FC = () => {
         </p>
       </div>
 
-      {/* Search Filters */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -595,7 +643,6 @@ const RideSearchBooking: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Search Results */}
       <div className="space-y-4">
         {loading ? (
           <div className="space-y-4">
@@ -655,12 +702,13 @@ const RideSearchBooking: React.FC = () => {
                   </div>
                   
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-primary">₹{ride.price_per_seat}</div>
-                    <div className="text-sm text-muted-foreground">per seat</div>
+                    <div className="text-lg font-bold text-primary">
+                      ₹{getMinPriceForRide(ride)} - ₹{getMaxPriceForRide(ride)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">per seat</div>
                   </div>
                 </div>
 
-                {/* Driver Profile */}
                 <div className="bg-muted/50 rounded-lg p-4 mb-4">
                   <h4 className="font-semibold mb-3 flex items-center gap-2">
                     <Users className="h-4 w-4" />
@@ -693,61 +741,63 @@ const RideSearchBooking: React.FC = () => {
                   )}
                 </div>
 
-                {/* Seat Visualization */}
-                <SeatVisualization
-                  totalSeats={4} // Default car capacity, could be enhanced with vehicle data
+                <EnhancedSeatVisualization
+                  totalSeats={4}
                   availableSeats={ride.available_seats}
+                  basePrice={ride.base_price}
                   vehicleType={ride.vehicles?.car_type || 'car'}
+                  bookedSeats={convertBookedSeats(ride.booked_seats || [])}
+                  isSelectable={false}
+                  isDriverView={false}
                 />
 
-                {/* Booking Button */}
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center mt-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Phone className="h-4 w-4" />
                     <span>Contact available after booking</span>
                   </div>
                   
-                   {(() => {
-                     const existingBooking = userBookings.find(booking => 
-                       booking.ride_id === ride.id && 
-                       ['pending', 'confirmed'].includes(booking.status)
-                     );
-                     
-                     const availableSeats = ride.available_seats;
-                     
-                     if (existingBooking) {
-                       return (
-                         <Button variant="outline" disabled>
-                           Already Booked
-                         </Button>
-                       );
-                     }
-                     
-                     if (availableSeats === 0) {
-                       return (
-                         <Button variant="outline" disabled>
-                           Fully Booked
-                         </Button>
-                       );
-                     }
-                     
-                     return (
-                       <Dialog open={selectedRide?.id === ride.id} onOpenChange={(open) => !open && setSelectedRide(null)}>
-                         <DialogTrigger asChild>
-                           <Button 
-                             onClick={() => setSelectedRide(ride)}
+                  {(() => {
+                    const existingBooking = userBookings.find(booking => 
+                      booking.ride_id === ride.id && 
+                      ['pending', 'confirmed'].includes(booking.status)
+                    );
+                    
+                    const availableSeats = ride.available_seats;
+                    
+                    if (existingBooking) {
+                      return (
+                        <Button variant="outline" disabled>
+                          Already Booked
+                        </Button>
+                      );
+                    }
+                    
+                    if (availableSeats === 0) {
+                      return (
+                        <Button variant="outline" disabled>
+                          Fully Booked
+                        </Button>
+                      );
+                    }
+                    
+                    return (
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button 
+                            onClick={() => setSelectedRide(ride)}
                             disabled={ride.available_seats === 0}
                           >
                             {ride.available_seats === 0 ? 'Fully Booked' : 'Book Now'}
                           </Button>
                         </DialogTrigger>
                         
-                        <DialogContent>
+                        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>Book Your Ride</DialogTitle>
                           </DialogHeader>
                           
-                          <div className="space-y-4">
+                          <div className="space-y-6">
                             <div className="bg-muted/50 rounded-lg p-4">
                               <h4 className="font-semibold mb-2">{ride.from_city} → {ride.to_city}</h4>
                               <div className="text-sm space-y-1">
@@ -758,22 +808,18 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            <div>
-                              <Label htmlFor="seats_booked">Number of Seats</Label>
-                              <Input
-                                id="seats_booked"
-                                type="number"
-                                min="1"
-                                max={ride.available_seats}
-                                value={bookingForm.seats_booked}
-                                onChange={(e) => setBookingForm(prev => ({ 
-                                  ...prev, 
-                                  seats_booked: parseInt(e.target.value) 
-                                }))}
-                              />
-                            </div>
+                            <EnhancedSeatVisualization
+                              totalSeats={4}
+                              availableSeats={ride.available_seats}
+                              basePrice={ride.base_price}
+                              vehicleType={ride.vehicles?.car_type || 'car'}
+                              onSeatSelect={handleSeatSelection}
+                              maxSelectableSeats={Math.min(3, ride.available_seats)}
+                              bookedSeats={convertBookedSeats(ride.booked_seats || [])}
+                              isSelectable={true}
+                              isDriverView={false}
+                            />
                             
-                            {/* Passenger Details Section */}
                             <div className="space-y-4 border-t pt-4">
                               <h4 className="font-semibold text-sm text-muted-foreground">PASSENGER DETAILS</h4>
                               
@@ -820,7 +866,6 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            {/* Personal Information */}
                             <div className="space-y-4 border-t pt-4">
                               <h4 className="font-semibold text-sm text-muted-foreground">PERSONAL INFORMATION</h4>
                               
@@ -894,27 +939,9 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            {/* Travel Preferences */}
+                            {/* Travel Notes */}
                             <div className="space-y-4 border-t pt-4">
-                              <h4 className="font-semibold text-sm text-muted-foreground">TRAVEL PREFERENCES</h4>
-                              
-                              <div>
-                                <Label htmlFor="preferred_seat">Preferred Seat (Optional)</Label>
-                                <Select 
-                                  value={bookingForm.preferred_seat} 
-                                  onValueChange={(value) => setBookingForm(prev => ({ ...prev, preferred_seat: value }))}
-                                >
-                                  <SelectTrigger id="preferred_seat">
-                                    <SelectValue placeholder="Select preferred seat" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="front">Front Seat</SelectItem>
-                                    <SelectItem value="window">Window Seat</SelectItem>
-                                    <SelectItem value="middle">Middle Seat</SelectItem>
-                                    <SelectItem value="any">Any Seat</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
+                              <h4 className="font-semibold text-sm text-muted-foreground">ADDITIONAL NOTES</h4>
                               
                               <div>
                                 <Label htmlFor="passenger_notes">Additional Notes (Optional)</Label>
@@ -930,21 +957,24 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            <div className="bg-primary/10 rounded-lg p-4">
-                              <div className="flex justify-between items-center">
-                                <span className="font-semibold">Total Amount:</span>
-                                <span className="text-2xl font-bold text-primary">
-                                  ₹{bookingForm.seats_booked * ride.price_per_seat}
-                                </span>
+                            {/* Total Amount */}
+                            {bookingForm.total_price > 0 && (
+                              <div className="bg-primary/10 rounded-lg p-4 border-t pt-4">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-semibold">Total Amount:</span>
+                                  <span className="text-2xl font-bold text-primary">
+                                    ₹{bookingForm.total_price}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {bookingForm.selected_seats.length} seat(s): {bookingForm.selected_seats.join(', ')}
+                                </p>
                               </div>
-                              <p className="text-sm text-muted-foreground">
-                                {bookingForm.seats_booked} seat(s) × ₹{ride.price_per_seat}
-                              </p>
-                            </div>
+                            )}
                             
                             <Button 
                               onClick={bookRide} 
-                              disabled={booking}
+                              disabled={booking || bookingForm.selected_seats.length === 0}
                               className="w-full"
                             >
                               {booking ? 'Booking...' : 'Confirm Booking'}
