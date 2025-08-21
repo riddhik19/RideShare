@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { User, UserCheck, Car } from 'lucide-react';
+import { User, UserCheck, Car, Settings, Info } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface SeatInfo {
   id: string;
@@ -11,6 +12,13 @@ interface SeatInfo {
   isSelected: boolean;
   bookedBy?: string;
   price: number;
+  row: number;
+  position: number;
+}
+
+interface BookedSeat {
+  seatId: string;
+  passengerName: string;
 }
 
 interface EnhancedSeatVisualizationProps {
@@ -20,12 +28,10 @@ interface EnhancedSeatVisualizationProps {
   vehicleType?: string;
   onSeatSelect?: (selectedSeats: string[], totalPrice: number) => void;
   maxSelectableSeats?: number;
-  bookedSeats?: Array<{
-    seatId: string;
-    passengerName: string;
-  }>;
+  bookedSeats?: BookedSeat[];
   isSelectable?: boolean;
   isDriverView?: boolean;
+  showPricing?: boolean;
 }
 
 export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps> = ({ 
@@ -37,10 +43,12 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
   maxSelectableSeats = 1,
   bookedSeats = [],
   isSelectable = true,
-  isDriverView = false
+  isDriverView = false,
+  showPricing = true
 }) => {
   const [seats, setSeats] = useState<SeatInfo[]>([]);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
+  const [hoveredSeat, setHoveredSeat] = useState<string | null>(null);
 
   // Seat pricing configuration
   const seatPricing = {
@@ -62,94 +70,93 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
         isBooked: true,
         isSelected: false,
         bookedBy: 'Driver',
-        price: 0
+        price: 0,
+        row: 0,
+        position: 0
       });
 
-      if (totalSeats <= 4) {
-        // Small car layout: Front passenger + 2-3 rear seats
-        seatLayout.push({
-          id: 'F1',
-          type: 'front',
-          isBooked: false,
-          isSelected: false,
-          price: seatPricing.front
-        });
+      // Add front passenger seat
+      seatLayout.push({
+        id: 'F1',
+        type: 'front',
+        isBooked: false,
+        isSelected: false,
+        price: seatPricing.front,
+        row: 0,
+        position: 1
+      });
 
-        // Rear seats
-        for (let i = 1; i <= totalSeats - 1; i++) {
-          const seatId = `R${i}`;
-          const seatType = i === 1 || i === 3 ? 'window' : 'middle';
+      // Generate rear seats based on total seats
+      const rearSeats = totalSeats - 1; // Excluding front passenger seat
+      let seatCounter = 1;
+
+      if (totalSeats <= 4) {
+        // Small car: 1 front + 2-3 rear seats in one row
+        for (let i = 0; i < rearSeats; i++) {
+          const seatId = `R1_${i + 1}`;
+          const seatType = (i === 0 || i === 2) ? 'window' : 'middle';
           seatLayout.push({
             id: seatId,
             type: seatType,
             isBooked: false,
             isSelected: false,
-            price: seatPricing[seatType]
+            price: seatPricing[seatType],
+            row: 1,
+            position: i
           });
         }
-      } else if (totalSeats <= 6) {
-        // Medium car/SUV layout: Front passenger + 4-5 rear seats
-        seatLayout.push({
-          id: 'F1',
-          type: 'front',
-          isBooked: false,
-          isSelected: false,
-          price: seatPricing.front
-        });
-
-        // Rear seats (2 rows)
-        const rearSeats = totalSeats - 1;
+      } else if (totalSeats <= 7) {
+        // Medium car/SUV: 1 front + multiple rear seats in 2 rows
         const firstRowSeats = Math.min(3, rearSeats);
         const secondRowSeats = rearSeats - firstRowSeats;
 
-        for (let i = 1; i <= firstRowSeats; i++) {
-          const seatId = `R1_${i}`;
-          const seatType = i === 1 || i === 3 ? 'window' : 'middle';
+        // First rear row
+        for (let i = 0; i < firstRowSeats; i++) {
+          const seatId = `R1_${i + 1}`;
+          const seatType = (i === 0 || i === 2) ? 'window' : 'middle';
           seatLayout.push({
             id: seatId,
             type: seatType,
             isBooked: false,
             isSelected: false,
-            price: seatPricing[seatType]
+            price: seatPricing[seatType],
+            row: 1,
+            position: i
           });
         }
 
-        for (let i = 1; i <= secondRowSeats; i++) {
-          const seatId = `R2_${i}`;
-          const seatType = i === 1 || i === 2 ? 'window' : 'middle';
+        // Second rear row
+        for (let i = 0; i < secondRowSeats; i++) {
+          const seatId = `R2_${i + 1}`;
+          const seatType = (i === 0 || i === 1) ? 'window' : 'middle';
           seatLayout.push({
             id: seatId,
             type: seatType,
             isBooked: false,
             isSelected: false,
-            price: seatPricing[seatType]
+            price: seatPricing[seatType],
+            row: 2,
+            position: i
           });
         }
       } else {
-        // Large vehicle layout: Front passenger + multiple rows
-        seatLayout.push({
-          id: 'F1',
-          type: 'front',
-          isBooked: false,
-          isSelected: false,
-          price: seatPricing.front
-        });
-
-        // Multiple rear rows
-        const rearSeats = totalSeats - 1;
+        // Large vehicle: Multiple rows
         const rows = Math.ceil(rearSeats / 3);
         
-        for (let row = 1; row <= rows; row++) {
-          const seatsInRow = Math.min(3, rearSeats - (row - 1) * 3);
-          for (let seat = 1; seat <= seatsInRow; seat++) {
-            const seatId = `R${row}_${seat}`;
-            const seatType = seat === 1 || seat === 3 ? 'window' : 'middle';
+        for (let row = 0; row < rows; row++) {
+          const seatsInThisRow = Math.min(3, rearSeats - (row * 3));
+          
+          for (let seat = 0; seat < seatsInThisRow; seat++) {
+            const seatId = `R${row + 1}_${seat + 1}`;
+            const seatType = (seat === 0 || seat === 2) ? 'window' : 'middle';
             seatLayout.push({
               id: seatId,
               type: seatType,
               isBooked: false,
               isSelected: false,
-              price: seatPricing[seatType]
+              price: seatPricing[seatType],
+              row: row + 1,
+              position: seat
             });
           }
         }
@@ -168,6 +175,7 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
     };
 
     setSeats(generateSeats());
+    setSelectedSeats([]); // Reset selection when seats change
   }, [totalSeats, basePrice, bookedSeats]);
 
   const handleSeatClick = (seatId: string) => {
@@ -184,6 +192,7 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
     } else {
       // Select seat (respect max limit)
       if (selectedSeats.length >= maxSelectableSeats) {
+        // Replace the oldest selection with new one
         newSelectedSeats = [...selectedSeats.slice(1), seatId];
       } else {
         newSelectedSeats = [...selectedSeats, seatId];
@@ -208,59 +217,87 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
   };
 
   const getSeatClassName = (seat: SeatInfo) => {
-    const baseClasses = "w-12 h-8 border rounded flex items-center justify-center transition-all duration-200 cursor-pointer relative";
+    const baseClasses = "relative w-12 h-12 border-2 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer transform hover:scale-105 font-medium text-xs";
     
     if (seat.type === 'driver') {
-      return `${baseClasses} bg-gray-700 border-gray-600 text-white cursor-not-allowed`;
+      return `${baseClasses} bg-gray-800 border-gray-700 text-white cursor-not-allowed hover:scale-100`;
     }
     
     if (seat.isBooked) {
-      return `${baseClasses} bg-red-100 border-red-300 text-red-600 cursor-not-allowed`;
+      return `${baseClasses} bg-red-100 border-red-400 text-red-700 cursor-not-allowed hover:scale-100 opacity-75`;
     }
     
     if (seat.isSelected) {
-      return `${baseClasses} bg-blue-200 border-blue-400 text-blue-700 ring-2 ring-blue-400`;
+      return `${baseClasses} bg-blue-500 border-blue-600 text-white shadow-lg ring-2 ring-blue-300`;
     }
     
     // Available seats with type-based styling
     const typeColors = {
-      front: 'bg-purple-50 border-purple-300 text-purple-700 hover:bg-purple-100',
-      window: 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100',
-      middle: 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100',
+      front: 'bg-purple-50 border-purple-300 text-purple-800 hover:bg-purple-100 hover:border-purple-400',
+      window: 'bg-green-50 border-green-300 text-green-800 hover:bg-green-100 hover:border-green-400',
+      middle: 'bg-gray-50 border-gray-300 text-gray-800 hover:bg-gray-100 hover:border-gray-400',
       driver: ''
     };
     
-    return `${baseClasses} ${typeColors[seat.type]} ${!isSelectable || isDriverView ? 'cursor-not-allowed' : 'hover:scale-105'}`;
+    return `${baseClasses} ${typeColors[seat.type]} ${!isSelectable || isDriverView ? 'cursor-not-allowed hover:scale-100' : ''}`;
   };
 
   const renderSeatIcon = (seat: SeatInfo) => {
     if (seat.type === 'driver') {
-      return <Car className="h-4 w-4" />;
+      return <Settings className="h-6 w-6" />;
     }
     
     if (seat.isBooked) {
-      return <UserCheck className="h-3 w-3" />;
+      return <UserCheck className="h-5 w-5" />;
     }
     
-    return <User className="h-3 w-3" />;
+    if (seat.isSelected) {
+      return <User className="h-5 w-5" />;
+    }
+    
+    return <User className="h-4 w-4 opacity-60" />;
+  };
+
+  const getSeatTooltipContent = (seat: SeatInfo) => {
+    if (seat.type === 'driver') {
+      return "Driver Seat";
+    }
+    
+    if (seat.isBooked) {
+      return `Booked by ${seat.bookedBy}`;
+    }
+    
+    const seatTypeNames = {
+      front: 'Front Seat',
+      window: 'Window Seat',
+      middle: 'Middle Seat',
+      driver: 'Driver Seat'
+    };
+    
+    return (
+      <div className="text-center">
+        <div className="font-semibold">{seatTypeNames[seat.type]}</div>
+        <div className="text-lg font-bold text-green-400">₹{seat.price}</div>
+        {seat.type === 'front' && <div className="text-xs">Premium (+₹100)</div>}
+        {seat.type === 'window' && <div className="text-xs">Window (+₹50)</div>}
+        {seat.type === 'middle' && <div className="text-xs">Standard</div>}
+      </div>
+    );
   };
 
   const groupSeatsByRow = () => {
-    const rows: { [key: string]: SeatInfo[] } = {};
+    const rows: { [key: number]: SeatInfo[] } = {};
     
     seats.forEach(seat => {
-      if (seat.type === 'driver') {
-        if (!rows['driver']) rows['driver'] = [];
-        rows['driver'].push(seat);
-      } else if (seat.id.startsWith('F')) {
-        if (!rows['front']) rows['front'] = [];
-        rows['front'].push(seat);
-      } else {
-        const rowMatch = seat.id.match(/R(\d+)_/);
-        const rowKey = rowMatch ? `row_${rowMatch[1]}` : 'rear';
-        if (!rows[rowKey]) rows[rowKey] = [];
-        rows[rowKey].push(seat);
+      if (!rows[seat.row]) {
+        rows[seat.row] = [];
       }
+      rows[seat.row].push(seat);
+    });
+    
+    // Sort seats within each row by position
+    Object.keys(rows).forEach(rowKey => {
+      rows[parseInt(rowKey)].sort((a, b) => a.position - b.position);
     });
     
     return rows;
@@ -272,155 +309,158 @@ export const EnhancedSeatVisualization: React.FC<EnhancedSeatVisualizationProps>
     return total + (seat?.price || 0);
   }, 0);
 
+  const getRowLabel = (rowNumber: number) => {
+    if (rowNumber === 0) return "Front";
+    return `Row ${rowNumber}`;
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium">Seat Selection</h4>
-        <div className="flex items-center gap-4 text-xs">
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-purple-100 border border-purple-300 rounded"></div>
-            <span>Front (+₹100)</span>
+    <TooltipProvider>
+      <div className="space-y-6">
+        {/* Legend */}
+        {showPricing && (
+          <div className="flex items-center justify-between">
+            <h4 className="text-lg font-semibold">Select Your Seats</h4>
+            <div className="flex items-center gap-6 text-xs">
+              <div className="flex items-center gap-1">
+                <div className="w-4 h-4 bg-purple-100 border-2 border-purple-300 rounded"></div>
+                <span>Front (+₹100)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-4 h-4 bg-green-100 border-2 border-green-300 rounded"></div>
+                <span>Window (+₹50)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-4 h-4 bg-gray-100 border-2 border-gray-300 rounded"></div>
+                <span>Standard</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-4 h-4 bg-red-100 border-2 border-red-300 rounded"></div>
+                <span>Booked</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
-            <span>Window (+₹50)</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded"></div>
-            <span>Middle (Base)</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-red-100 border border-red-300 rounded"></div>
-            <span>Booked</span>
-          </div>
-        </div>
-      </div>
-      
-      <Card className="p-4 bg-gradient-to-b from-blue-50 to-blue-100 relative">
-        {/* Vehicle outline */}
-        <div className="border-2 border-gray-400 rounded-lg p-4 bg-white/50 min-h-[200px]">
-          <div className="space-y-3">
-            {/* Driver Row */}
-            {seatRows.driver && (
-              <div className="flex justify-start mb-4">
-                <div className="flex items-center gap-2">
-                  {seatRows.driver.map((seat) => (
-                    <div key={seat.id} className="text-center">
-                      <div
-                        className={getSeatClassName(seat)}
-                        onClick={() => handleSeatClick(seat.id)}
-                        title={`Driver Seat`}
-                      >
-                        {renderSeatIcon(seat)}
-                      </div>
-                      <span className="text-xs text-gray-600 mt-1 block">Driver</span>
+        )}
+        
+        <Card className="p-6 bg-gradient-to-br from-blue-50 via-white to-blue-50 border-2 border-blue-200">
+          {/* Vehicle visualization */}
+          <div className="relative bg-white rounded-xl border-3 border-gray-400 p-6 shadow-inner min-h-[300px]">
+            {/* Dashboard indicator */}
+            <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs text-gray-500 font-medium">
+              🚗 Front of Vehicle
+            </div>
+            
+            <div className="space-y-6 mt-8">
+              {Object.keys(seatRows)
+                .map(Number)
+                .sort((a, b) => a - b)
+                .map((rowNumber) => (
+                  <div key={rowNumber} className="space-y-2">
+                    <div className="text-xs font-medium text-gray-600 text-center">
+                      {getRowLabel(rowNumber)}
                     </div>
-                  ))}
-                  <div className="ml-4 text-xs text-gray-500">
-                    🚗 Front of Vehicle
+                    
+                    <div className={`flex justify-center gap-3 ${rowNumber === 0 ? 'mb-8' : ''}`}>
+                      {seatRows[rowNumber].map((seat) => (
+                        <Tooltip key={seat.id}>
+                          <TooltipTrigger asChild>
+                            <div
+                              className={getSeatClassName(seat)}
+                              onClick={() => handleSeatClick(seat.id)}
+                              onMouseEnter={() => setHoveredSeat(seat.id)}
+                              onMouseLeave={() => setHoveredSeat(null)}
+                            >
+                              {renderSeatIcon(seat)}
+                              
+                              {/* Selection indicator */}
+                              {seat.isSelected && (
+                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white"></div>
+                              )}
+                              
+                              {/* Seat ID */}
+                              <div className="absolute -bottom-5 left-1/2 transform -translate-x-1/2 text-xs text-gray-500">
+                                {seat.id !== 'driver' ? seat.id : 'D'}
+                              </div>
+                              
+                              {/* Price on hover */}
+                              {hoveredSeat === seat.id && seat.type !== 'driver' && !seat.isBooked && (
+                                <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black text-white px-2 py-1 rounded text-xs font-bold z-10">
+                                  ₹{seat.price}
+                                </div>
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {getSeatTooltipContent(seat)}
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+          
+          {/* Summary Section */}
+          <div className="mt-6 pt-6 border-t border-blue-200">
+            <div className="flex justify-between items-center">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">
+                  Total Seats: <span className="text-blue-600">{totalSeats}</span>
+                </div>
+                <div className="text-sm font-medium text-green-600">
+                  Available: {availableSeats - selectedSeats.length}
+                </div>
+                {bookedSeats.length > 0 && (
+                  <div className="text-sm text-red-600">
+                    Booked: {bookedSeats.length}
+                  </div>
+                )}
+              </div>
+              
+              {selectedSeats.length > 0 && (
+                <div className="text-right">
+                  <div className="text-sm font-medium">
+                    Selected: {selectedSeats.length} seat{selectedSeats.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    ₹{totalPrice}
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Front Passenger Row */}
-            {seatRows.front && (
-              <div className="flex justify-end mb-4">
-                <div className="flex gap-2">
-                  {seatRows.front.map((seat) => (
-                    <div key={seat.id} className="text-center">
-                      <div
-                        className={getSeatClassName(seat)}
-                        onClick={() => handleSeatClick(seat.id)}
-                        title={`Front Seat - ₹${seat.price}`}
-                      >
-                        {renderSeatIcon(seat)}
-                        {seat.isSelected && (
-                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></div>
-                        )}
-                      </div>
-                      <span className="text-xs text-gray-600 mt-1 block">
-                        ₹{seat.price}
-                      </span>
-                      {seat.isBooked && (
-                        <span className="text-xs text-red-600 block truncate max-w-[48px]">
-                          {seat.bookedBy}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Rear Rows */}
-            {Object.keys(seatRows)
-              .filter(key => key.startsWith('row_') || key === 'rear')
-              .sort()
-              .map((rowKey) => (
-                <div key={rowKey} className="flex justify-center gap-2 mb-2">
-                  {seatRows[rowKey].map((seat) => (
-                    <div key={seat.id} className="text-center">
-                      <div
-                        className={getSeatClassName(seat)}
-                        onClick={() => handleSeatClick(seat.id)}
-                        title={`${seat.type} Seat - ₹${seat.price}`}
-                      >
-                        {renderSeatIcon(seat)}
-                        {seat.isSelected && (
-                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></div>
-                        )}
-                      </div>
-                      <span className="text-xs text-gray-600 mt-1 block">
-                        ₹{seat.price}
-                      </span>
-                      {seat.isBooked && (
-                        <span className="text-xs text-red-600 block truncate max-w-[48px]">
-                          {seat.bookedBy}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ))}
-          </div>
-        </div>
-        
-        {/* Summary */}
-        <div className="mt-4 pt-4 border-t border-blue-200">
-          <div className="flex justify-between items-center text-sm">
-            <div className="space-y-1">
-              <div>Total Seats: {totalSeats}</div>
-              <div className="text-green-600 font-medium">
-                Available: {availableSeats - selectedSeats.length}
-              </div>
+              )}
             </div>
             
             {selectedSeats.length > 0 && (
-              <div className="text-right">
-                <div className="font-medium">Selected: {selectedSeats.length} seat(s)</div>
-                <div className="text-lg font-bold text-primary">
-                  Total: ₹{totalPrice}
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="text-sm text-blue-800 font-medium mb-2">
+                  Selected Seats: {selectedSeats.join(', ')}
+                </div>
+                <div className="text-xs text-blue-600">
+                  {selectedSeats.map(seatId => {
+                    const seat = seats.find(s => s.id === seatId);
+                    const seatTypeNames = {
+                      front: 'Front',
+                      window: 'Window',
+                      middle: 'Standard',
+                      driver: 'Driver'
+                    };
+                    return `${seatId} (${seatTypeNames[seat?.type || 'middle']} - ₹${seat?.price})`;
+                  }).join(', ')}
+                </div>
+              </div>
+            )}
+            
+            {!isSelectable && isDriverView && (
+              <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <div className="flex items-center gap-2 text-amber-800 text-sm">
+                  <Info className="h-4 w-4" />
+                  <span>This is how passengers will see your seat layout</span>
                 </div>
               </div>
             )}
           </div>
-          
-          {selectedSeats.length > 0 && (
-            <div className="mt-2 p-2 bg-blue-50 rounded">
-              <div className="text-xs text-blue-800">
-                <strong>Selected Seats:</strong> {selectedSeats.join(', ')}
-              </div>
-              <div className="text-xs text-blue-600 mt-1">
-                Breakdown: {selectedSeats.map(seatId => {
-                  const seat = seats.find(s => s.id === seatId);
-                  return `${seatId} (₹${seat?.price})`;
-                }).join(', ')}
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </TooltipProvider>
   );
 };

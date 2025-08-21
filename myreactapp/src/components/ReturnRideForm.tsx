@@ -80,24 +80,37 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
     setLoading(true);
     
     try {
-      const { error } = await supabase
+      // Prepare the return ride data with correct field names matching the database schema
+      const returnRideData = {
+        driver_id: user.id,
+        vehicle_id: originalRide.vehicleId,
+        from_city: originalRide.toCity, // Swap cities for return
+        to_city: originalRide.fromCity,
+        departure_date: format(data.returnDate!, 'yyyy-MM-dd'),
+        departure_time: data.returnTime!,
+        pickup_point: data.returnPickupPoint!,
+        available_seats: data.returnAvailableSeats!,
+        total_seats: data.returnAvailableSeats!, // Add total_seats field
+        base_price: data.returnPricePerSeat!, // Add base_price field
+        price_per_seat: data.returnPricePerSeat!, // Keep price_per_seat for compatibility
+        notes: data.returnNotes || null,
+        is_active: true, // Ensure the ride is active
+      };
+
+      console.log('Attempting to insert return ride data:', returnRideData);
+
+      const { data: insertedRide, error } = await supabase
         .from('rides')
-        .insert({
-          driver_id: user.id,
-          vehicle_id: originalRide.vehicleId,
-          from_city: originalRide.toCity, // Swap cities for return
-          to_city: originalRide.fromCity,
-          departure_date: format(data.returnDate!, 'yyyy-MM-dd'),
-          departure_time: data.returnTime!,
-          pickup_point: data.returnPickupPoint!,
-          available_seats: data.returnAvailableSeats!,
-          price_per_seat: data.returnPricePerSeat!,
-          notes: data.returnNotes || null,
-        });
+        .insert(returnRideData)
+        .select()
+        .single();
 
       if (error) {
+        console.error('Supabase error details:', error);
         throw error;
       }
+
+      console.log('Return ride created successfully:', insertedRide);
 
       toast({
         title: 'Success',
@@ -109,12 +122,29 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
         toCity: originalRide.fromCity,
         departureDate: data.returnDate,
         departureTime: data.returnTime,
+        id: insertedRide.id
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error posting return ride:', error);
+      
+      let errorMessage = 'Please try again.';
+      
+      if (error && typeof error === 'object' && 'message' in error) {
+        const errorMsg = (error as { message: string }).message;
+        if (errorMsg.includes('duplicate key')) {
+          errorMessage = 'A return ride with these details already exists.';
+        } else if (errorMsg.includes('foreign key')) {
+          errorMessage = 'Please ensure vehicle is valid.';
+        } else if (errorMsg.includes('check constraint')) {
+          errorMessage = 'Please check your input values.';
+        } else {
+          errorMessage = errorMsg;
+        }
+      }
+      
       toast({
         title: 'Error',
-        description: 'Failed to post return ride. Please try again.',
+        description: `Failed to post return ride: ${errorMessage}`,
         variant: 'destructive',
       });
     } finally {

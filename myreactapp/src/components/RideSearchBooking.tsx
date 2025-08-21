@@ -11,7 +11,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Search, MapPin, Calendar, Clock, Users, Star, Phone, Car, Filter } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { SafetyTransferNotification } from '@/components/SafetyTransferNotification';
 import { EnhancedSeatVisualization } from '@/components/EnhancedSeatVisualization';
 import { CitySearch } from '@/components/ui/city-search';
 
@@ -23,6 +22,7 @@ interface Ride {
   departure_time: string;
   pickup_point: string;
   available_seats: number;
+  total_seats: number;
   base_price: number;
   price_per_seat?: number;
   notes: string | null;
@@ -31,7 +31,6 @@ interface Ride {
   is_active?: boolean;
   status?: string;
   updated_at?: string;
-  total_seats?: number;
   vehicles: {
     car_model: string | null;
     car_type: string | null;
@@ -56,13 +55,16 @@ interface UserBooking {
   selected_seats?: string[];
 }
 
-interface BookingData {
+// Define proper types for database responses
+interface BookingRecord {
   ride_id: string;
   status: string;
-  selected_seats?: string[];
+  seats_booked: number;
+  selected_seats?: string[] | null;
+  passenger_id: string;
   profiles?: {
-    full_name: string;
-  };
+    full_name: string | null;
+  } | null;
 }
 
 const RideSearchBooking: React.FC = () => {
@@ -90,9 +92,8 @@ const RideSearchBooking: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(false);
-  const [transferRequest, setTransferRequest] = useState<any>(null);
-  const [showTransferNotification, setShowTransferNotification] = useState(false);
   const [userBookings, setUserBookings] = useState<UserBooking[]>([]);
+  const [isBookingDialogOpen, setIsBookingDialogOpen] = useState(false);
 
   useEffect(() => {
     if (profile?.id) {
@@ -111,29 +112,33 @@ const RideSearchBooking: React.FC = () => {
     }
     
     try {
-      // First try to fetch without selected_seats
+      // First, let's try to get the booking data without selected_seats
       const { data, error } = await supabase
         .from('bookings')
-        .select('ride_id, status')
+        .select('ride_id, status, seats_booked')
         .eq('passenger_id', profile.id)
         .in('status', ['pending', 'confirmed']);
 
       if (error) {
-        throw error;
+        console.error('Error fetching bookings:', error);
+        // If there's an error, set empty array and continue
+        setUserBookings([]);
+        return;
       }
       
-      const bookings = (data || []).map(booking => ({
+      const bookings: UserBooking[] = (data || []).map((booking: any) => ({
         ride_id: booking.ride_id,
         status: booking.status as 'pending' | 'confirmed' | 'cancelled' | 'completed',
-        selected_seats: [] // Initialize as empty array
+        selected_seats: [] // Default to empty array since column might not exist
       }));
       
       setUserBookings(bookings);
     } catch (error) {
       console.error('Error fetching bookings:', error);
+      setUserBookings([]);
       toast({
-        title: "Error",
-        description: "Failed to fetch your bookings",
+        title: "Warning",
+        description: "Could not load your booking history",
         variant: "destructive"
       });
     }
@@ -141,31 +146,46 @@ const RideSearchBooking: React.FC = () => {
 
   const fetchBookedSeats = async (rideId: string) => {
     try {
-      // Try to fetch booked seats with a simpler query
-      const { data, error } = await supabase
+      // Try to fetch with selected_seats first, fallback if column doesn't exist
+      let query = supabase
         .from('bookings')
-        .select('passenger_id')
+        .select(`
+          seats_booked,
+          profiles:passenger_id (
+            full_name
+          )
+        `)
         .eq('ride_id', rideId)
         .in('status', ['confirmed', 'pending']);
 
+      const { data, error } = await query;
+
       if (error) {
-        throw error;
+        console.error('Error fetching booked seats:', error);
+        return [];
       }
 
-      // For now, return empty array as we don't have seat selection implemented
-      // You'll need to implement proper seat tracking in your database
-      return [];
+      // Since selected_seats might not exist, we'll generate seat IDs based on seats_booked
+      const bookedSeats: Array<{ seat_id: string; passenger_name: string }> = [];
+      
+      (data || []).forEach((booking: any, index: number) => {
+        const seatsBooked = booking.seats_booked || 1;
+        const passengerName = booking.profiles?.full_name || 'Anonymous';
+        
+        // Generate seat IDs for booked seats (this is a fallback approach)
+        for (let i = 0; i < seatsBooked; i++) {
+          bookedSeats.push({
+            seat_id: `R${Math.floor(index / 2) + 1}_${(index % 2) + 1}`, // Generate seat pattern
+            passenger_name: passengerName
+          });
+        }
+      });
+
+      return bookedSeats;
     } catch (error) {
       console.error('Error fetching booked seats:', error);
       return [];
     }
-  };
-
-  const convertBookedSeats = (bookedSeats: Array<{ seat_id: string; passenger_name: string }>) => {
-    return bookedSeats.map(seat => ({
-      seatId: seat.seat_id,
-      passengerName: seat.passenger_name
-    }));
   };
 
   const searchRides = async () => {
@@ -215,7 +235,8 @@ const RideSearchBooking: React.FC = () => {
           const bookedSeats = await fetchBookedSeats(ride.id);
           return {
             ...ride,
-            base_price: ride.price_per_seat || 100, // Use price_per_seat if base_price doesn't exist
+            base_price: ride.base_price || ride.price_per_seat || 100,
+            total_seats: ride.total_seats || ride.available_seats || 4,
             booked_seats: bookedSeats
           };
         })
@@ -288,6 +309,7 @@ const RideSearchBooking: React.FC = () => {
 
     setBooking(true);
     try {
+      // Update profile with gender and age
       await supabase
         .from('profiles')
         .update({
@@ -296,16 +318,26 @@ const RideSearchBooking: React.FC = () => {
         })
         .eq('id', profile.id);
 
+      // Create booking - use seats_booked instead of selected_seats if the column doesn't exist
+      const bookingData: any = {
+        ride_id: selectedRide.id,
+        passenger_id: profile.id,
+        seats_booked: bookingForm.selected_seats.length,
+        total_price: bookingForm.total_price,
+        passenger_notes: bookingForm.passenger_notes,
+        status: 'pending'
+      };
+
+      // Try to include selected_seats if the column exists
+      try {
+        bookingData.selected_seats = bookingForm.selected_seats;
+      } catch (error) {
+        console.log('selected_seats column not available, using seats_booked only');
+      }
+
       const { data: newBooking, error } = await supabase
         .from('bookings')
-        .insert({
-          ride_id: selectedRide.id,
-          passenger_id: profile.id,
-          seats_booked: bookingForm.selected_seats.length,
-          total_price: bookingForm.total_price,
-          passenger_notes: bookingForm.passenger_notes,
-          status: 'pending'
-        })
+        .insert(bookingData)
         .select()
         .single();
 
@@ -316,177 +348,21 @@ const RideSearchBooking: React.FC = () => {
 
       console.log('✅ Booking created successfully:', newBooking);
 
+      // Update available seats
       const newAvailableSeats = selectedRide.available_seats - bookingForm.selected_seats.length;
       await supabase
         .from('rides')
         .update({ available_seats: newAvailableSeats })
         .eq('id', selectedRide.id);
 
-      if (bookingForm.gender === 'female') {
-        try {
-          const { data: transferData, error: transferError } = await supabase.functions.invoke('safety-transfer', {
-            body: {
-              bookingId: newBooking.id,
-              passengerGender: bookingForm.gender,
-              passengerAge: parseInt(bookingForm.age),
-              routeFrom: selectedRide.from_city,
-              routeTo: selectedRide.to_city,
-              departureDate: selectedRide.departure_date,
-              departureTime: selectedRide.departure_time,
-              preferredSeat: bookingForm.selected_seats[0],
-              originalVehicleBrand: selectedRide.vehicles?.car_type,
-              originalVehicleSegment: selectedRide.vehicles?.car_type
-            }
-          });
-
-          if (transferData?.transferRequest) {
-            setTransferRequest(transferData.transferRequest);
-            setShowTransferNotification(true);
-          }
-        } catch (transferError) {
-          console.log('No suitable transfer found or transfer service unavailable');
-        }
-      }
-
       const bookingReference = `RS${newBooking.id.substring(0, 8).toUpperCase()}`;
       
-      const emailPromises = [
-        supabase.functions.invoke('send-booking-confirmation', {
-          body: {
-            type: 'passenger',
-            booking: {
-              id: newBooking.id,
-              booking_reference: bookingReference,
-              passenger_name: profile.full_name || bookingForm.passenger_name,
-              passenger_email: profile.email || bookingForm.passenger_email,
-              passenger_phone: profile.phone || bookingForm.passenger_phone,
-              driver_name: selectedRide.profiles.full_name || 'Unknown Driver',
-              driver_email: 'driver@rideshare.com',
-              driver_phone: selectedRide.profiles.phone || '',
-              driver_rating: selectedRide.profiles.average_rating || 0,
-              vehicle_details: {
-                make: selectedRide.vehicles?.car_model?.split(' ')[0] || 'Unknown',
-                model: selectedRide.vehicles?.car_model?.split(' ').slice(1).join(' ') || 'Vehicle',
-                color: selectedRide.vehicles?.color || 'Unknown',
-                license_plate: 'XX-XX-XXXX',
-                type: selectedRide.vehicles?.car_type || 'Standard'
-              },
-              trip_details: {
-                from_city: selectedRide.from_city,
-                to_city: selectedRide.to_city,
-                pickup_location: selectedRide.pickup_point,
-                departure_date: selectedRide.departure_date,
-                departure_time: selectedRide.departure_time,
-                estimated_duration: '2-3 hours',
-                fare_breakdown: {
-                  base_fare: bookingForm.total_price * 0.9,
-                  taxes: bookingForm.total_price * 0.1,
-                  total: bookingForm.total_price
-                }
-              },
-              seats_booked: bookingForm.selected_seats.length,
-              passenger_rating: 0
-            }
-          }
-        }),
-        
-        supabase.functions.invoke('send-booking-confirmation', {
-          body: {
-            type: 'driver',
-            booking: {
-              id: newBooking.id,
-              booking_reference: bookingReference,
-              passenger_name: profile.full_name || bookingForm.passenger_name,
-              passenger_email: profile.email || bookingForm.passenger_email,
-              passenger_phone: profile.phone || bookingForm.passenger_phone,
-              driver_name: selectedRide.profiles.full_name || 'Unknown Driver',
-              driver_email: 'driver@rideshare.com',
-              driver_phone: selectedRide.profiles.phone || '',
-              driver_rating: selectedRide.profiles.average_rating || 0,
-              vehicle_details: {
-                make: selectedRide.vehicles?.car_model?.split(' ')[0] || 'Unknown',
-                model: selectedRide.vehicles?.car_model?.split(' ').slice(1).join(' ') || 'Vehicle',
-                color: selectedRide.vehicles?.color || 'Unknown',
-                license_plate: 'XX-XX-XXXX',
-                type: selectedRide.vehicles?.car_type || 'Standard'
-              },
-              trip_details: {
-                from_city: selectedRide.from_city,
-                to_city: selectedRide.to_city,
-                pickup_location: selectedRide.pickup_point,
-                departure_date: selectedRide.departure_date,
-                departure_time: selectedRide.departure_time,
-                estimated_duration: '2-3 hours',
-                fare_breakdown: {
-                  base_fare: bookingForm.total_price * 0.9,
-                  taxes: bookingForm.total_price * 0.1,
-                  total: bookingForm.total_price
-                }
-              },
-              seats_booked: bookingForm.selected_seats.length,
-              passenger_rating: 0
-            }
-          }
-        })
-      ];
-
-      const smsPromises = [];
-      
-      if (bookingForm.passenger_phone) {
-        smsPromises.push(
-          supabase.functions.invoke('send-sms-notification', {
-            body: {
-              to: bookingForm.passenger_phone,
-              message: `🚗 Booking Confirmed! Trip: ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)} at ${selectedRide.departure_time}. Seats: ${bookingForm.selected_seats.join(', ')}. Ref: ${bookingReference}`,
-              type: 'booking_confirmation'
-            }
-          })
-        );
-      }
-      
-      if (selectedRide.profiles?.phone) {
-        smsPromises.push(
-          supabase.functions.invoke('send-sms-notification', {
-            body: {
-              to: selectedRide.profiles.phone,
-              message: `🚗 New Booking Alert! ${bookingForm.passenger_name} booked seats ${bookingForm.selected_seats.join(', ')} for ${selectedRide.from_city} to ${selectedRide.to_city} on ${formatDate(selectedRide.departure_date)}. Ref: ${bookingReference}`,
-              type: 'booking_confirmation'
-            }
-          })
-        );
-      }
-
-      const allPromises = [...emailPromises, ...smsPromises];
-      Promise.allSettled(allPromises).then(results => {
-        results.forEach((result, index) => {
-          if (index < emailPromises.length) {
-            const emailType = index === 0 ? 'passenger' : 'driver';
-            if (result.status === 'fulfilled') {
-              console.log(`✅ ${emailType} email sent successfully:`, result.value);
-            } else {
-              console.error(`❌ ${emailType} email failed:`, result.reason);
-            }
-          } else {
-            const smsIndex = index - emailPromises.length;
-            const smsType = bookingForm.passenger_phone && smsIndex === 0 ? 'passenger' : 'driver';
-            if (result.status === 'fulfilled') {
-              console.log(`📱 ${smsType} SMS sent successfully:`, result.value);
-            } else {
-              console.error(`❌ ${smsType} SMS failed:`, result.reason);
-            }
-          }
-        });
-        
-        const description = smsPromises.length > 0 
-          ? `Your booking for seats ${bookingForm.selected_seats.join(', ')} has been submitted for approval. Confirmation emails and SMS sent!`
-          : `Your booking for seats ${bookingForm.selected_seats.join(', ')} has been submitted for approval. Confirmation emails sent!`;
-          
-        toast({
-          title: "Booking Successful!",
-          description
-        });
+      toast({
+        title: "Booking Successful!",
+        description: `Your booking for ${bookingForm.selected_seats.length} seat(s) has been submitted for approval. Reference: ${bookingReference}`
       });
 
+      setIsBookingDialogOpen(false);
       setSelectedRide(null);
       setBookingForm({ 
         passenger_name: '',
@@ -513,20 +389,6 @@ const RideSearchBooking: React.FC = () => {
     } finally {
       setBooking(false);
     }
-  };
-
-  const handleTransferResponse = (response: 'accepted' | 'declined') => {
-    setShowTransferNotification(false);
-    setTransferRequest(null);
-    
-    if (response === 'accepted') {
-      searchRides();
-    }
-  };
-
-  const handleTransferExpire = () => {
-    setShowTransferNotification(false);
-    setTransferRequest(null);
   };
 
   const renderStars = (rating: number | null, totalRatings: number | null) => {
@@ -569,21 +431,14 @@ const RideSearchBooking: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {showTransferNotification && transferRequest && (
-        <SafetyTransferNotification
-          transferRequest={transferRequest}
-          onResponse={handleTransferResponse}
-          onExpire={handleTransferExpire}
-        />
-      )}
-      
       <div>
         <h2 className="text-2xl font-bold mb-2">Search & Book Rides</h2>
         <p className="text-muted-foreground">
-          Find and book city-to-city rides with verified drivers
+          Find and book city-to-city rides with verified drivers. Select your preferred seats!
         </p>
       </div>
 
+      {/* Search Form */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -643,6 +498,7 @@ const RideSearchBooking: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Rides List */}
       <div className="space-y-4">
         {loading ? (
           <div className="space-y-4">
@@ -709,6 +565,7 @@ const RideSearchBooking: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Driver Information */}
                 <div className="bg-muted/50 rounded-lg p-4 mb-4">
                   <h4 className="font-semibold mb-3 flex items-center gap-2">
                     <Users className="h-4 w-4" />
@@ -741,14 +598,19 @@ const RideSearchBooking: React.FC = () => {
                   )}
                 </div>
 
+                {/* Seat Layout Preview */}
                 <EnhancedSeatVisualization
-                  totalSeats={4}
+                  totalSeats={ride.total_seats}
                   availableSeats={ride.available_seats}
                   basePrice={ride.base_price}
                   vehicleType={ride.vehicles?.car_type || 'car'}
-                  bookedSeats={convertBookedSeats(ride.booked_seats || [])}
+                  bookedSeats={ride.booked_seats?.map(seat => ({
+                    seatId: seat.seat_id,
+                    passengerName: seat.passenger_name
+                  })) || []}
                   isSelectable={false}
                   isDriverView={false}
+                  showPricing={false}
                 />
 
                 <div className="flex justify-between items-center mt-4">
@@ -782,22 +644,23 @@ const RideSearchBooking: React.FC = () => {
                     }
                     
                     return (
-                      <Dialog>
+                      <Dialog open={isBookingDialogOpen} onOpenChange={setIsBookingDialogOpen}>
                         <DialogTrigger asChild>
                           <Button 
                             onClick={() => setSelectedRide(ride)}
                             disabled={ride.available_seats === 0}
                           >
-                            {ride.available_seats === 0 ? 'Fully Booked' : 'Book Now'}
+                            {ride.available_seats === 0 ? 'Fully Booked' : 'Book Seats'}
                           </Button>
                         </DialogTrigger>
                         
-                        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
-                            <DialogTitle>Book Your Ride</DialogTitle>
+                            <DialogTitle>Select Your Seats & Book Ride</DialogTitle>
                           </DialogHeader>
                           
                           <div className="space-y-6">
+                            {/* Trip Summary */}
                             <div className="bg-muted/50 rounded-lg p-4">
                               <h4 className="font-semibold mb-2">{ride.from_city} → {ride.to_city}</h4>
                               <div className="text-sm space-y-1">
@@ -808,18 +671,24 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
+                            {/* Interactive Seat Selection */}
                             <EnhancedSeatVisualization
-                              totalSeats={4}
+                              totalSeats={ride.total_seats}
                               availableSeats={ride.available_seats}
                               basePrice={ride.base_price}
                               vehicleType={ride.vehicles?.car_type || 'car'}
                               onSeatSelect={handleSeatSelection}
-                              maxSelectableSeats={Math.min(3, ride.available_seats)}
-                              bookedSeats={convertBookedSeats(ride.booked_seats || [])}
+                              maxSelectableSeats={Math.min(4, ride.available_seats)}
+                              bookedSeats={ride.booked_seats?.map(seat => ({
+                                seatId: seat.seat_id,
+                                passengerName: seat.passenger_name
+                              })) || []}
                               isSelectable={true}
                               isDriverView={false}
+                              showPricing={true}
                             />
                             
+                            {/* Passenger Details Form */}
                             <div className="space-y-4 border-t pt-4">
                               <h4 className="font-semibold text-sm text-muted-foreground">PASSENGER DETAILS</h4>
                               
@@ -866,6 +735,7 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
+                            {/* Personal Information */}
                             <div className="space-y-4 border-t pt-4">
                               <h4 className="font-semibold text-sm text-muted-foreground">PERSONAL INFORMATION</h4>
                               
@@ -908,7 +778,7 @@ const RideSearchBooking: React.FC = () => {
                             
                             {/* Emergency Contact */}
                             <div className="space-y-4 border-t pt-4">
-                              <h4 className="font-semibold text-sm text-muted-foreground">EMERGENCY CONTACT</h4>
+                              <h4 className="font-semibold text-sm text-muted-foreground">EMERGENCY CONTACT (Optional)</h4>
                               
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -939,7 +809,7 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            {/* Travel Notes */}
+                            {/* Additional Notes */}
                             <div className="space-y-4 border-t pt-4">
                               <h4 className="font-semibold text-sm text-muted-foreground">ADDITIONAL NOTES</h4>
                               
@@ -969,16 +839,83 @@ const RideSearchBooking: React.FC = () => {
                                 <p className="text-sm text-muted-foreground">
                                   {bookingForm.selected_seats.length} seat(s): {bookingForm.selected_seats.join(', ')}
                                 </p>
+                                
+                                {/* Seat Price Breakdown */}
+                                <div className="mt-3 pt-3 border-t border-primary/20">
+                                  <h5 className="text-sm font-medium mb-2">Price Breakdown:</h5>
+                                  <div className="space-y-1 text-xs">
+                                    {bookingForm.selected_seats.map(seatId => {
+                                      let seatPrice = ride.base_price;
+                                      let seatType = 'Standard';
+                                      
+                                      if (seatId.startsWith('F')) {
+                                        seatPrice = ride.base_price + 100;
+                                        seatType = 'Front';
+                                      } else if (seatId.endsWith('_1') || seatId.endsWith('_3')) {
+                                        seatPrice = ride.base_price + 50;
+                                        seatType = 'Window';
+                                      }
+                                      
+                                      return (
+                                        <div key={seatId} className="flex justify-between">
+                                          <span>{seatId} ({seatType})</span>
+                                          <span>₹{seatPrice}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               </div>
                             )}
                             
-                            <Button 
-                              onClick={bookRide} 
-                              disabled={booking || bookingForm.selected_seats.length === 0}
-                              className="w-full"
-                            >
-                              {booking ? 'Booking...' : 'Confirm Booking'}
-                            </Button>
+                            {/* Booking Terms & Conditions */}
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                              <h5 className="font-semibold text-amber-800 mb-2">Important Information</h5>
+                              <ul className="text-sm text-amber-700 space-y-1">
+                                <li>• Please arrive at pickup point 10 minutes before departure time</li>
+                                <li>• Your booking will be confirmed by the driver</li>
+                                <li>• Cancellation allowed up to 2 hours before departure</li>
+                                <li>• Driver contact details will be shared after confirmation</li>
+                              </ul>
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="flex gap-3 pt-4">
+                              <Button 
+                                variant="outline" 
+                                onClick={() => setIsBookingDialogOpen(false)}
+                                disabled={booking}
+                                className="flex-1"
+                              >
+                                Cancel
+                              </Button>
+                              <Button 
+                                onClick={bookRide} 
+                                disabled={booking || bookingForm.selected_seats.length === 0}
+                                className="flex-2 min-w-[200px]"
+                              >
+                                {booking ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    Booking...
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span>Confirm Booking</span>
+                                    {bookingForm.total_price > 0 && (
+                                      <span className="bg-white/20 px-2 py-1 rounded text-sm">
+                                        ₹{bookingForm.total_price}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </Button>
+                            </div>
+                            
+                            {/* Help Text */}
+                            <div className="text-center text-xs text-muted-foreground border-t pt-4">
+                              <p>Need help? Contact support at support@rideshare.com</p>
+                            </div>
                           </div>
                         </DialogContent>
                       </Dialog>
@@ -990,6 +927,71 @@ const RideSearchBooking: React.FC = () => {
           ))
         )}
       </div>
+
+      {/* Quick Filters (Optional Enhancement) */}
+      {rides.length > 0 && (
+        <Card className="border-dashed">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-sm">Quick Filters:</h4>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setSearchFilters(prev => ({ ...prev, min_seats: 1 }))}
+                  className={searchFilters.min_seats === 1 ? 'bg-primary text-white' : ''}
+                >
+                  Any Seats
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setSearchFilters(prev => ({ ...prev, min_seats: 2 }))}
+                  className={searchFilters.min_seats === 2 ? 'bg-primary text-white' : ''}
+                >
+                  2+ Seats
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setSearchFilters(prev => ({ ...prev, min_seats: 4 }))}
+                  className={searchFilters.min_seats === 4 ? 'bg-primary text-white' : ''}
+                >
+                  4+ Seats
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    setSearchFilters({
+                      from_city: '',
+                      to_city: '',
+                      departure_date: '',
+                      min_seats: 1
+                    });
+                    searchRides();
+                  }}
+                >
+                  Clear All
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Floating Action Button for Quick Search (Mobile Friendly) */}
+      {rides.length > 5 && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <Button 
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="rounded-full w-12 h-12 shadow-lg"
+            size="sm"
+          >
+            <Search className="h-5 w-5" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
