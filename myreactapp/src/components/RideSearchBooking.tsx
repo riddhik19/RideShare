@@ -55,18 +55,6 @@ interface UserBooking {
   selected_seats?: string[];
 }
 
-// Define proper types for database responses
-interface BookingRecord {
-  ride_id: string;
-  status: string;
-  seats_booked: number;
-  selected_seats?: string[] | null;
-  passenger_id: string;
-  profiles?: {
-    full_name: string | null;
-  } | null;
-}
-
 const RideSearchBooking: React.FC = () => {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -94,6 +82,7 @@ const RideSearchBooking: React.FC = () => {
   const [booking, setBooking] = useState(false);
   const [userBookings, setUserBookings] = useState<UserBooking[]>([]);
   const [isBookingDialogOpen, setIsBookingDialogOpen] = useState(false);
+  const [seatSelections, setSeatSelections] = useState<{[rideId: string]: {seats: string[], price: number}}>({});
 
   useEffect(() => {
     if (profile?.id) {
@@ -112,7 +101,6 @@ const RideSearchBooking: React.FC = () => {
     }
     
     try {
-      // First, let's try to get the booking data without selected_seats
       const { data, error } = await supabase
         .from('bookings')
         .select('ride_id, status, seats_booked')
@@ -121,7 +109,6 @@ const RideSearchBooking: React.FC = () => {
 
       if (error) {
         console.error('Error fetching bookings:', error);
-        // If there's an error, set empty array and continue
         setUserBookings([]);
         return;
       }
@@ -129,7 +116,7 @@ const RideSearchBooking: React.FC = () => {
       const bookings: UserBooking[] = (data || []).map((booking: any) => ({
         ride_id: booking.ride_id,
         status: booking.status as 'pending' | 'confirmed' | 'cancelled' | 'completed',
-        selected_seats: [] // Default to empty array since column might not exist
+        selected_seats: []
       }));
       
       setUserBookings(bookings);
@@ -146,11 +133,11 @@ const RideSearchBooking: React.FC = () => {
 
   const fetchBookedSeats = async (rideId: string) => {
     try {
-      // Try to fetch with selected_seats first, fallback if column doesn't exist
-      let query = supabase
+      const { data, error } = await supabase
         .from('bookings')
         .select(`
           seats_booked,
+          selected_seats,
           profiles:passenger_id (
             full_name
           )
@@ -158,26 +145,34 @@ const RideSearchBooking: React.FC = () => {
         .eq('ride_id', rideId)
         .in('status', ['confirmed', 'pending']);
 
-      const { data, error } = await query;
-
       if (error) {
         console.error('Error fetching booked seats:', error);
         return [];
       }
 
-      // Since selected_seats might not exist, we'll generate seat IDs based on seats_booked
       const bookedSeats: Array<{ seat_id: string; passenger_name: string }> = [];
       
       (data || []).forEach((booking: any, index: number) => {
         const seatsBooked = booking.seats_booked || 1;
         const passengerName = booking.profiles?.full_name || 'Anonymous';
+        const selectedSeats = booking.selected_seats || [];
         
-        // Generate seat IDs for booked seats (this is a fallback approach)
-        for (let i = 0; i < seatsBooked; i++) {
-          bookedSeats.push({
-            seat_id: `R${Math.floor(index / 2) + 1}_${(index % 2) + 1}`, // Generate seat pattern
-            passenger_name: passengerName
+        if (selectedSeats.length > 0) {
+          // Use actual selected seats if available
+          selectedSeats.forEach((seatId: string) => {
+            bookedSeats.push({
+              seat_id: seatId,
+              passenger_name: passengerName
+            });
           });
+        } else {
+          // Fallback: generate seat IDs based on seats_booked
+          for (let i = 0; i < seatsBooked; i++) {
+            bookedSeats.push({
+              seat_id: `R${Math.floor(index / 2) + 1}_${(index % 2) + 1}`,
+              passenger_name: passengerName
+            });
+          }
         }
       });
 
@@ -255,12 +250,24 @@ const RideSearchBooking: React.FC = () => {
     }
   };
 
-  const handleSeatSelection = (selectedSeats: string[], totalPrice: number) => {
-    setBookingForm(prev => ({
+  const handleSeatSelection = (rideId: string, selectedSeats: string[], totalPrice: number) => {
+    setSeatSelections(prev => ({
       ...prev,
-      selected_seats: selectedSeats,
-      total_price: totalPrice
+      [rideId]: { seats: selectedSeats, price: totalPrice }
     }));
+  };
+
+  const openBookingDialog = (ride: Ride) => {
+    setSelectedRide(ride);
+    const selection = seatSelections[ride.id];
+    if (selection) {
+      setBookingForm(prev => ({
+        ...prev,
+        selected_seats: selection.seats,
+        total_price: selection.price
+      }));
+    }
+    setIsBookingDialogOpen(true);
   };
 
   const bookRide = async () => {
@@ -275,7 +282,8 @@ const RideSearchBooking: React.FC = () => {
       return;
     }
 
-    if (bookingForm.selected_seats.length === 0) {
+    const selectedSeats = seatSelections[selectedRide.id]?.seats || [];
+    if (selectedSeats.length === 0) {
       toast({
         title: "No Seats Selected",
         description: "Please select at least one seat",
@@ -298,7 +306,7 @@ const RideSearchBooking: React.FC = () => {
       return;
     }
 
-    if (bookingForm.selected_seats.length > selectedRide.available_seats) {
+    if (selectedSeats.length > selectedRide.available_seats) {
       toast({
         title: "Not Enough Seats",
         description: `Only ${selectedRide.available_seats} seat(s) available. Please select fewer seats.`,
@@ -318,22 +326,16 @@ const RideSearchBooking: React.FC = () => {
         })
         .eq('id', profile.id);
 
-      // Create booking - use seats_booked instead of selected_seats if the column doesn't exist
+      // Create booking with selected seats
       const bookingData: any = {
         ride_id: selectedRide.id,
         passenger_id: profile.id,
-        seats_booked: bookingForm.selected_seats.length,
-        total_price: bookingForm.total_price,
+        seats_booked: selectedSeats.length,
+        total_price: seatSelections[selectedRide.id]?.price || 0,
         passenger_notes: bookingForm.passenger_notes,
-        status: 'pending'
+        status: 'pending',
+        selected_seats: selectedSeats
       };
-
-      // Try to include selected_seats if the column exists
-      try {
-        bookingData.selected_seats = bookingForm.selected_seats;
-      } catch (error) {
-        console.log('selected_seats column not available, using seats_booked only');
-      }
 
       const { data: newBooking, error } = await supabase
         .from('bookings')
@@ -349,7 +351,7 @@ const RideSearchBooking: React.FC = () => {
       console.log('✅ Booking created successfully:', newBooking);
 
       // Update available seats
-      const newAvailableSeats = selectedRide.available_seats - bookingForm.selected_seats.length;
+      const newAvailableSeats = selectedRide.available_seats - selectedSeats.length;
       await supabase
         .from('rides')
         .update({ available_seats: newAvailableSeats })
@@ -359,7 +361,7 @@ const RideSearchBooking: React.FC = () => {
       
       toast({
         title: "Booking Successful!",
-        description: `Your booking for ${bookingForm.selected_seats.length} seat(s) has been submitted for approval. Reference: ${bookingReference}`
+        description: `Your booking for ${selectedSeats.length} seat(s) has been submitted for approval. Reference: ${bookingReference}`
       });
 
       setIsBookingDialogOpen(false);
@@ -376,6 +378,14 @@ const RideSearchBooking: React.FC = () => {
         selected_seats: [],
         total_price: 0
       });
+      
+      // Clear seat selection for this ride
+      setSeatSelections(prev => {
+        const newSelections = { ...prev };
+        delete newSelections[selectedRide.id];
+        return newSelections;
+      });
+      
       fetchUserBookings();
       searchRides();
 
@@ -598,20 +608,24 @@ const RideSearchBooking: React.FC = () => {
                   )}
                 </div>
 
-                {/* Seat Layout Preview */}
-                <EnhancedSeatVisualization
-                  totalSeats={ride.total_seats}
-                  availableSeats={ride.available_seats}
-                  basePrice={ride.base_price}
-                  vehicleType={ride.vehicles?.car_type || 'car'}
-                  bookedSeats={ride.booked_seats?.map(seat => ({
-                    seatId: seat.seat_id,
-                    passengerName: seat.passenger_name
-                  })) || []}
-                  isSelectable={false}
-                  isDriverView={false}
-                  showPricing={false}
-                />
+                {/* Enhanced Seat Layout - Now Visible in Search Results */}
+                <div className="mb-6">
+                  <EnhancedSeatVisualization
+                    totalSeats={ride.total_seats}
+                    availableSeats={ride.available_seats}
+                    basePrice={ride.base_price}
+                    vehicleType={ride.vehicles?.car_type || 'car'}
+                    onSeatSelect={(selectedSeats, totalPrice) => handleSeatSelection(ride.id, selectedSeats, totalPrice)}
+                    maxSelectableSeats={Math.min(4, ride.available_seats)}
+                    bookedSeats={ride.booked_seats?.map(seat => ({
+                      seatId: seat.seat_id,
+                      passengerName: seat.passenger_name
+                    })) || []}
+                    isSelectable={true}
+                    isDriverView={false}
+                    showPricing={true}
+                  />
+                </div>
 
                 <div className="flex justify-between items-center mt-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -626,6 +640,7 @@ const RideSearchBooking: React.FC = () => {
                     );
                     
                     const availableSeats = ride.available_seats;
+                    const selectedSeats = seatSelections[ride.id]?.seats || [];
                     
                     if (existingBooking) {
                       return (
@@ -644,19 +659,28 @@ const RideSearchBooking: React.FC = () => {
                     }
                     
                     return (
-                      <Dialog open={isBookingDialogOpen} onOpenChange={setIsBookingDialogOpen}>
+                      <Dialog open={isBookingDialogOpen && selectedRide?.id === ride.id} onOpenChange={(open) => {
+                        if (!open) {
+                          setIsBookingDialogOpen(false);
+                          setSelectedRide(null);
+                        }
+                      }}>
                         <DialogTrigger asChild>
                           <Button 
-                            onClick={() => setSelectedRide(ride)}
-                            disabled={ride.available_seats === 0}
+                            onClick={() => openBookingDialog(ride)}
+                            disabled={selectedSeats.length === 0}
+                            className={selectedSeats.length > 0 ? 'bg-green-600 hover:bg-green-700' : ''}
                           >
-                            {ride.available_seats === 0 ? 'Fully Booked' : 'Book Seats'}
+                            {selectedSeats.length === 0 
+                              ? 'Select Seats First' 
+                              : `Book ${selectedSeats.length} Seat${selectedSeats.length > 1 ? 's' : ''} - ₹${seatSelections[ride.id]?.price || 0}`
+                            }
                           </Button>
                         </DialogTrigger>
                         
-                        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
-                            <DialogTitle>Select Your Seats & Book Ride</DialogTitle>
+                            <DialogTitle>Complete Your Booking</DialogTitle>
                           </DialogHeader>
                           
                           <div className="space-y-6">
@@ -668,25 +692,10 @@ const RideSearchBooking: React.FC = () => {
                                 <p><span className="text-muted-foreground">Time:</span> {ride.departure_time}</p>
                                 <p><span className="text-muted-foreground">Pickup:</span> {ride.pickup_point}</p>
                                 <p><span className="text-muted-foreground">Driver:</span> {ride.profiles.full_name || 'Unknown Driver'}</p>
+                                <p><span className="text-muted-foreground">Selected Seats:</span> {selectedSeats.join(', ')}</p>
+                                <p><span className="text-muted-foreground">Total Price:</span> ₹{seatSelections[ride.id]?.price || 0}</p>
                               </div>
                             </div>
-                            
-                            {/* Interactive Seat Selection */}
-                            <EnhancedSeatVisualization
-                              totalSeats={ride.total_seats}
-                              availableSeats={ride.available_seats}
-                              basePrice={ride.base_price}
-                              vehicleType={ride.vehicles?.car_type || 'car'}
-                              onSeatSelect={handleSeatSelection}
-                              maxSelectableSeats={Math.min(4, ride.available_seats)}
-                              bookedSeats={ride.booked_seats?.map(seat => ({
-                                seatId: seat.seat_id,
-                                passengerName: seat.passenger_name
-                              })) || []}
-                              isSelectable={true}
-                              isDriverView={false}
-                              showPricing={true}
-                            />
                             
                             {/* Passenger Details Form */}
                             <div className="space-y-4 border-t pt-4">
@@ -827,47 +836,6 @@ const RideSearchBooking: React.FC = () => {
                               </div>
                             </div>
                             
-                            {/* Total Amount */}
-                            {bookingForm.total_price > 0 && (
-                              <div className="bg-primary/10 rounded-lg p-4 border-t pt-4">
-                                <div className="flex justify-between items-center">
-                                  <span className="font-semibold">Total Amount:</span>
-                                  <span className="text-2xl font-bold text-primary">
-                                    ₹{bookingForm.total_price}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-muted-foreground">
-                                  {bookingForm.selected_seats.length} seat(s): {bookingForm.selected_seats.join(', ')}
-                                </p>
-                                
-                                {/* Seat Price Breakdown */}
-                                <div className="mt-3 pt-3 border-t border-primary/20">
-                                  <h5 className="text-sm font-medium mb-2">Price Breakdown:</h5>
-                                  <div className="space-y-1 text-xs">
-                                    {bookingForm.selected_seats.map(seatId => {
-                                      let seatPrice = ride.base_price;
-                                      let seatType = 'Standard';
-                                      
-                                      if (seatId.startsWith('F')) {
-                                        seatPrice = ride.base_price + 100;
-                                        seatType = 'Front';
-                                      } else if (seatId.endsWith('_1') || seatId.endsWith('_3')) {
-                                        seatPrice = ride.base_price + 50;
-                                        seatType = 'Window';
-                                      }
-                                      
-                                      return (
-                                        <div key={seatId} className="flex justify-between">
-                                          <span>{seatId} ({seatType})</span>
-                                          <span>₹{seatPrice}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            
                             {/* Booking Terms & Conditions */}
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                               <h5 className="font-semibold text-amber-800 mb-2">Important Information</h5>
@@ -891,7 +859,7 @@ const RideSearchBooking: React.FC = () => {
                               </Button>
                               <Button 
                                 onClick={bookRide} 
-                                disabled={booking || bookingForm.selected_seats.length === 0}
+                                disabled={booking || selectedSeats.length === 0}
                                 className="flex-2 min-w-[200px]"
                               >
                                 {booking ? (
@@ -902,11 +870,9 @@ const RideSearchBooking: React.FC = () => {
                                 ) : (
                                   <div className="flex items-center gap-2">
                                     <span>Confirm Booking</span>
-                                    {bookingForm.total_price > 0 && (
-                                      <span className="bg-white/20 px-2 py-1 rounded text-sm">
-                                        ₹{bookingForm.total_price}
-                                      </span>
-                                    )}
+                                    <span className="bg-white/20 px-2 py-1 rounded text-sm">
+                                      ₹{seatSelections[ride.id]?.price || 0}
+                                    </span>
                                   </div>
                                 )}
                               </Button>
@@ -928,7 +894,7 @@ const RideSearchBooking: React.FC = () => {
         )}
       </div>
 
-      {/* Quick Filters (Optional Enhancement) */}
+      {/* Quick Filters */}
       {rides.length > 0 && (
         <Card className="border-dashed">
           <CardContent className="p-4">

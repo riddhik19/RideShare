@@ -123,9 +123,9 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       departure_time: data.departureTime,
       pickup_point: data.pickupPoint,
       available_seats: data.availableSeats,
-      total_seats: data.availableSeats, // Set total_seats to match available_seats
-      base_price: data.basePrice, // Add base_price field
-      price_per_seat: data.basePrice, // Keep price_per_seat for compatibility
+      total_seats: data.availableSeats, // Set total_seats to match available_seats initially
+      base_price: data.basePrice, // Add base_price field for seat pricing
+      price_per_seat: data.basePrice, // Keep price_per_seat for backward compatibility
       notes: data.notes || null,
       is_active: true, // Ensure the ride is active
     };
