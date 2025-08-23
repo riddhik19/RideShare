@@ -32,6 +32,9 @@ export type Database = {
           status: Database["public"]["Enums"]["booking_status"]
           total_price: number
           updated_at: string
+          // NEW FIELDS FOR SEAT BOOKING
+          seat_id: string | null
+          booking_date: string | null
         }
         Insert: {
           bulk_booking_id?: string | null
@@ -52,6 +55,9 @@ export type Database = {
           status?: Database["public"]["Enums"]["booking_status"]
           total_price: number
           updated_at?: string
+          // NEW FIELDS FOR SEAT BOOKING
+          seat_id?: string | null
+          booking_date?: string | null
         }
         Update: {
           bulk_booking_id?: string | null
@@ -72,6 +78,9 @@ export type Database = {
           status?: Database["public"]["Enums"]["booking_status"]
           total_price?: number
           updated_at?: string
+          // NEW FIELDS FOR SEAT BOOKING
+          seat_id?: string | null
+          booking_date?: string | null
         }
         Relationships: [
           {
@@ -328,6 +337,10 @@ export type Database = {
           to_city: string
           updated_at: string
           vehicle_id: string
+          // NEW FIELDS FOR SEAT BOOKING
+          base_price: number | null
+          total_seats: number | null
+          vehicle_type: string | null
         }
         Insert: {
           available_seats: number
@@ -344,6 +357,10 @@ export type Database = {
           to_city: string
           updated_at?: string
           vehicle_id: string
+          // NEW FIELDS FOR SEAT BOOKING
+          base_price?: number | null
+          total_seats?: number | null
+          vehicle_type?: string | null
         }
         Update: {
           available_seats?: number
@@ -360,6 +377,10 @@ export type Database = {
           to_city?: string
           updated_at?: string
           vehicle_id?: string
+          // NEW FIELDS FOR SEAT BOOKING
+          base_price?: number | null
+          total_seats?: number | null
+          vehicle_type?: string | null
         }
         Relationships: [
           {
@@ -548,6 +569,34 @@ export type Database = {
           },
         ]
       }
+      // NEW TABLE FOR VEHICLE TYPES AND SEAT LAYOUTS
+      vehicle_types: {
+        Row: {
+          id: string
+          name: string
+          total_seats: number
+          layout_config: any
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          total_seats: number
+          layout_config?: any
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          total_seats?: number
+          layout_config?: any
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
     Functions: {
@@ -592,7 +641,6 @@ export type Database = {
     CompositeTypes: { [_ in never]: never }
   }
 }
-
 
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
@@ -721,3 +769,45 @@ export const Constants = {
     },
   },
 } as const
+
+// ========== NEW HELPER TYPES FOR SEAT BOOKING ==========
+export type Ride = Database['public']['Tables']['rides']['Row'];
+export type RideInsert = Database['public']['Tables']['rides']['Insert'];
+export type RideUpdate = Database['public']['Tables']['rides']['Update'];
+
+export type Booking = Database['public']['Tables']['bookings']['Row'];
+export type BookingInsert = Database['public']['Tables']['bookings']['Insert'];
+export type BookingUpdate = Database['public']['Tables']['bookings']['Update'];
+
+export type Vehicle = Database['public']['Tables']['vehicles']['Row'];
+export type VehicleInsert = Database['public']['Tables']['vehicles']['Insert'];
+export type VehicleUpdate = Database['public']['Tables']['vehicles']['Update'];
+
+export type VehicleType = Database['public']['Tables']['vehicle_types']['Row'];
+export type VehicleTypeInsert = Database['public']['Tables']['vehicle_types']['Insert'];
+export type VehicleTypeUpdate = Database['public']['Tables']['vehicle_types']['Update'];
+
+export type Profile = Database['public']['Tables']['profiles']['Row'];
+export type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
+export type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
+
+// Additional seat booking specific types
+export interface BookedSeat {
+  seatId: string;
+  passengerId: string;
+  bookedAt: string;
+  price: number;
+}
+
+export interface RideSearchResult {
+  id: string;
+  from_location: string;
+  to_location: string;
+  departure_time: string;
+  base_price: number;
+  available_seats: number;
+  total_seats: number;
+  vehicle_type: string;
+  driver_name: string;
+  driver_rating: number;
+}
