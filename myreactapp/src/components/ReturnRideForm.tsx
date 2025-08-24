@@ -1,3 +1,4 @@
+// Fixed ReturnRideForm.tsx - corrected database field mapping
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -80,7 +81,7 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
     setLoading(true);
     
     try {
-      // Prepare the return ride data with correct field names matching the database schema
+      // ✅ FIXED: Corrected field mapping to match database schema
       const returnRideData = {
         driver_id: user.id,
         vehicle_id: originalRide.vehicleId,
@@ -90,14 +91,15 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
         departure_time: data.returnTime!,
         pickup_point: data.returnPickupPoint!,
         available_seats: data.returnAvailableSeats!,
-        total_seats: data.returnAvailableSeats!, // Add total_seats field
-        base_price: data.returnPricePerSeat!, // Add base_price field
-        price_per_seat: data.returnPricePerSeat!, // Keep price_per_seat for compatibility
+        price_per_seat: data.returnPricePerSeat!, // Use correct field name
         notes: data.returnNotes || null,
-        is_active: true, // Ensure the ride is active
+        is_active: true,
+        // Add these fields if they exist in your schema (from migrations)
+        ...(data.returnAvailableSeats && { total_seats: data.returnAvailableSeats }),
+        ...(data.returnPricePerSeat && { base_price: data.returnPricePerSeat })
       };
 
-      console.log('Attempting to insert return ride data:', returnRideData);
+      console.log('Inserting return ride with data:', returnRideData);
 
       const { data: insertedRide, error } = await supabase
         .from('rides')
@@ -137,6 +139,8 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
           errorMessage = 'Please ensure vehicle is valid.';
         } else if (errorMsg.includes('check constraint')) {
           errorMessage = 'Please check your input values.';
+        } else if (errorMsg.includes('not-null constraint')) {
+          errorMessage = 'Missing required fields.';
         } else {
           errorMessage = errorMsg;
         }

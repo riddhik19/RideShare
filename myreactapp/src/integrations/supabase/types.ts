@@ -35,6 +35,8 @@ export type Database = {
           // NEW FIELDS FOR SEAT BOOKING
           seat_id: string | null
           booking_date: string | null
+          selected_seats: string[] | null
+          idempotency_key: string | null
         }
         Insert: {
           bulk_booking_id?: string | null
@@ -58,6 +60,8 @@ export type Database = {
           // NEW FIELDS FOR SEAT BOOKING
           seat_id?: string | null
           booking_date?: string | null
+          selected_seats?: string[] | null
+          idempotency_key?: string | null
         }
         Update: {
           bulk_booking_id?: string | null
@@ -81,6 +85,8 @@ export type Database = {
           // NEW FIELDS FOR SEAT BOOKING
           seat_id?: string | null
           booking_date?: string | null
+          selected_seats?: string[] | null
+          idempotency_key?: string | null
         }
         Relationships: [
           {
@@ -323,64 +329,85 @@ export type Database = {
       }
       rides: {
         Row: {
-          available_seats: number
-          created_at: string
+          id: string
+          driver_id: string
+          vehicle_id: string
+          from_city: string
+          to_city: string
           departure_date: string
           departure_time: string
-          driver_id: string
-          from_city: string
-          id: string
-          is_active: boolean
-          notes: string | null
           pickup_point: string
+          available_seats: number
           price_per_seat: number
-          to_city: string
+          notes: string | null
+          created_at: string
           updated_at: string
-          vehicle_id: string
-          // NEW FIELDS FOR SEAT BOOKING
+          // CORRECTED: Using 'status' instead of 'is_active' to match your actual database
+          status: string // "active", "cancelled", etc.
+          // Additional fields from your database
+          vehicle_type_id: string | null
+          seat_layout: any | null
+          seat_pricing: any | null
           base_price: number | null
-          total_seats: number | null
+          total_seats: number
           vehicle_type: string | null
+          departure_timestamp: string
+          origin_point: any | null
+          destination_point: any | null
         }
         Insert: {
-          available_seats: number
-          created_at?: string
+          id?: string
+          driver_id: string
+          vehicle_id: string
+          from_city: string
+          to_city: string
           departure_date: string
           departure_time: string
-          driver_id: string
-          from_city: string
-          id?: string
-          is_active?: boolean
-          notes?: string | null
           pickup_point: string
+          available_seats: number
           price_per_seat: number
-          to_city: string
+          notes?: string | null
+          created_at?: string
           updated_at?: string
-          vehicle_id: string
-          // NEW FIELDS FOR SEAT BOOKING
+          // CORRECTED: Using 'status' instead of 'is_active'
+          status?: string
+          // Additional fields
+          vehicle_type_id?: string | null
+          seat_layout?: any | null
+          seat_pricing?: any | null
           base_price?: number | null
-          total_seats?: number | null
+          total_seats?: number
           vehicle_type?: string | null
+          departure_timestamp?: string
+          origin_point?: any | null
+          destination_point?: any | null
         }
         Update: {
-          available_seats?: number
-          created_at?: string
+          id?: string
+          driver_id?: string
+          vehicle_id?: string
+          from_city?: string
+          to_city?: string
           departure_date?: string
           departure_time?: string
-          driver_id?: string
-          from_city?: string
-          id?: string
-          is_active?: boolean
-          notes?: string | null
           pickup_point?: string
+          available_seats?: number
           price_per_seat?: number
-          to_city?: string
+          notes?: string | null
+          created_at?: string
           updated_at?: string
-          vehicle_id?: string
-          // NEW FIELDS FOR SEAT BOOKING
+          // CORRECTED: Using 'status' instead of 'is_active'
+          status?: string
+          // Additional fields
+          vehicle_type_id?: string | null
+          seat_layout?: any | null
+          seat_pricing?: any | null
           base_price?: number | null
-          total_seats?: number | null
+          total_seats?: number
           vehicle_type?: string | null
+          departure_timestamp?: string
+          origin_point?: any | null
+          destination_point?: any | null
         }
         Relationships: [
           {
@@ -569,7 +596,6 @@ export type Database = {
           },
         ]
       }
-      // NEW TABLE FOR VEHICLE TYPES AND SEAT LAYOUTS
       vehicle_types: {
         Row: {
           id: string
@@ -801,8 +827,8 @@ export interface BookedSeat {
 
 export interface RideSearchResult {
   id: string;
-  from_location: string;
-  to_location: string;
+  from_city: string; // Fixed: was from_location
+  to_city: string; // Fixed: was to_location  
   departure_time: string;
   base_price: number;
   available_seats: number;
@@ -810,4 +836,40 @@ export interface RideSearchResult {
   vehicle_type: string;
   driver_name: string;
   driver_rating: number;
+}
+
+// Additional interfaces for better type safety
+export interface RideWithDetails extends Ride {
+  profiles?: {
+    full_name: string;
+    phone: string | null;
+    average_rating: number | null;
+    total_ratings: number | null;
+  } | null;
+  vehicles?: {
+    car_model: string;
+    car_type: string;
+    color: string | null;
+    brand: string | null;
+    segment: string | null;
+  } | null;
+}
+
+export interface BookingWithDetails extends Booking {
+  profiles?: {
+    full_name: string;
+    phone: string | null;
+  } | null;
+  rides?: {
+    from_city: string;
+    to_city: string;
+    departure_date: string;
+    departure_time: string;
+    pickup_point: string;
+    driver_id?: string;
+    profiles?: {
+      full_name: string;
+      phone: string | null;
+    } | null;
+  } | null;
 }

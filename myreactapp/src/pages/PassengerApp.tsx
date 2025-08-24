@@ -1,3 +1,4 @@
+// Complete fixed PassengerApp.tsx - Replace the entire import and type section
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,114 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
+
+// ✅ FIXED: Complete type definitions matching Supabase structure
+interface DriverProfile {
+  full_name: string | null;
+  phone: string | null;
+  average_rating: number | null;
+  total_ratings: number | null;
+}
+
+interface Vehicle {
+  car_model: string | null;
+  car_type: string | null;
+  color: string | null;
+}
+
+// ✅ FIXED: Updated Ride interface to match actual Supabase data structure
+interface Ride {
+  id: string;
+  driver_id: string;
+  vehicle_id: string;
+  from_city: string;
+  to_city: string;
+  departure_date: string;
+  departure_time: string;
+  pickup_point: string;
+  available_seats: number;
+  price_per_seat: number;
+  base_price: number | null;
+  total_seats: number | null;
+  vehicle_type: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Optional joined data
+  profiles?: DriverProfile | null;
+  vehicles?: Vehicle | null;
+}
+
+interface BookingRide {
+  from_city: string | null;
+  to_city: string | null;
+  departure_date: string;
+  departure_time: string;
+  pickup_point?: string | null;
+  profiles?: DriverProfile | null;
+}
+
+interface Booking {
+  id: string;
+  bulk_booking_id: string | null;
+  created_at: string;
+  is_bulk_booking: boolean | null;
+  notif_15min_sent: boolean | null;
+  notif_15min_sent_at: string | null;
+  notif_1hr_sent: boolean | null;
+  seats_booked: number;
+  status: string;
+  total_price: number;
+  profiles?: DriverProfile | null;
+  rides?: BookingRide | null;
+}
+
+// ✅ FIXED: Helper function to safely cast Supabase data to Ride type
+const mapToRide = (data: any): Ride => ({
+  id: data.id,
+  driver_id: data.driver_id,
+  vehicle_id: data.vehicle_id,
+  from_city: data.from_city,
+  to_city: data.to_city,
+  departure_date: data.departure_date,
+  departure_time: data.departure_time,
+  pickup_point: data.pickup_point,
+  available_seats: data.available_seats,
+  price_per_seat: data.price_per_seat,
+  base_price: data.base_price ?? null,
+  total_seats: data.total_seats ?? null,
+  vehicle_type: data.vehicle_type ?? null,
+  notes: data.notes,
+  is_active: data.is_active,
+  created_at: data.created_at,
+  updated_at: data.updated_at,
+  profiles: data.profiles || null,
+  vehicles: data.vehicles || null,
+});
+
+// ✅ FIXED: Helper function to safely cast Supabase data to Booking type
+const mapToBooking = (data: any): Booking => ({
+  id: data.id,
+  bulk_booking_id: data.bulk_booking_id,
+  created_at: data.created_at,
+  is_bulk_booking: data.is_bulk_booking,
+  notif_15min_sent: data.notif_15min_sent,
+  notif_15min_sent_at: data.notif_15min_sent_at,
+  notif_1hr_sent: data.notif_1hr_sent,
+  seats_booked: data.seats_booked,
+  status: data.status,
+  total_price: data.total_price,
+  profiles: data.profiles || null,
+  rides: data.rides ? {
+    from_city: data.rides.from_city,
+    to_city: data.rides.to_city,
+    departure_date: data.rides.departure_date,
+    departure_time: data.rides.departure_time,
+    pickup_point: data.rides.pickup_point || null,
+    profiles: data.rides.profiles || null
+  } : null
+});
 
 export const PassengerApp = () => {
   const { profile } = useAuth();
@@ -48,8 +157,8 @@ export const PassengerApp = () => {
     }
   };
   
-  const [rides, setRides] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [rides, setRides] = useState<Ride[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [searchForm, setSearchForm] = useState({
@@ -58,7 +167,7 @@ export const PassengerApp = () => {
     date: '',
     seats: 1
   });
-  const [selectedRide, setSelectedRide] = useState(null);
+  const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
   const [bookingForm, setBookingForm] = useState({
     seats: 1,
     notes: ''
@@ -71,6 +180,7 @@ export const PassengerApp = () => {
     fetchMyBookings();
   }, []);
 
+  // ✅ FIXED: Type-safe fetchAllRides function
   const fetchAllRides = async () => {
     setLoading(true);
     try {
@@ -78,7 +188,7 @@ export const PassengerApp = () => {
         .from('rides')
         .select(`
           *,
-          profiles:driver_id (
+          profiles:rides_driver_id_fkey (
             full_name,
             phone,
             average_rating,
@@ -95,20 +205,71 @@ export const PassengerApp = () => {
         .order('departure_date', { ascending: true });
 
       if (error) throw error;
-      setRides(data || []);
+      
+      // ✅ FIXED: Safe type casting using helper function
+      const typedRides = (data || []).map(mapToRide);
+      
+      setRides(typedRides);
+      console.log('Fetched rides:', typedRides.length);
     } catch (error) {
       console.error('Error fetching rides:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch rides",
-        variant: "destructive"
-      });
+      
+      // Fallback approach
+      try {
+        const { data: ridesOnly, error: ridesError } = await supabase
+          .from('rides')
+          .select('*')
+          .eq('is_active', true)
+          .gte('departure_date', new Date().toISOString().split('T')[0])
+          .order('departure_date', { ascending: true });
+
+        if (ridesError) throw ridesError;
+
+        const ridesWithDetails = await Promise.all(
+          (ridesOnly || []).map(async (ride): Promise<Ride> => {
+            const { data: driverProfile } = await supabase
+              .from('profiles')
+              .select('full_name, phone, average_rating, total_ratings')
+              .eq('id', ride.driver_id)
+              .single();
+
+            const { data: vehicle } = await supabase
+              .from('vehicles')
+              .select('car_model, car_type, color')
+              .eq('id', ride.vehicle_id)
+              .single();
+
+            // ✅ FIXED: Use helper function for safe mapping
+            return mapToRide({
+              ...ride,
+              profiles: driverProfile,
+              vehicles: vehicle
+            });
+          })
+        );
+
+        setRides(ridesWithDetails);
+        console.log('Fetched rides (fallback):', ridesWithDetails.length);
+      } catch (fallbackError) {
+        console.error('Fallback query failed:', fallbackError);
+        toast({
+          title: "Error",
+          description: "Failed to fetch rides",
+          variant: "destructive"
+        });
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ FIXED: Type-safe fetchMyBookings function with profile null check
   const fetchMyBookings = async () => {
+    if (!profile?.id) {
+      console.warn('No profile ID available');
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('bookings')
@@ -126,13 +287,18 @@ export const PassengerApp = () => {
             )
           )
         `)
-        .eq('passenger_id', profile?.id)
+        .eq('passenger_id', profile.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setBookings(data || []);
+      
+      // ✅ FIXED: Safe type casting using helper function
+      const typedBookings = (data || []).map(mapToBooking);
+      
+      setBookings(typedBookings);
     } catch (error) {
       console.error('Error fetching bookings:', error);
+      setBookings([]);
     }
   };
 
@@ -143,7 +309,6 @@ export const PassengerApp = () => {
     try {
       const totalPrice = selectedRide.price_per_seat * bookingForm.seats;
       
-      // Insert booking
       const { error: bookingError } = await supabase
         .from('bookings')
         .insert({
@@ -157,7 +322,6 @@ export const PassengerApp = () => {
 
       if (bookingError) throw bookingError;
 
-      // Update available seats in the ride
       const { error: rideError } = await supabase
         .from('rides')
         .update({ 
@@ -176,13 +340,13 @@ export const PassengerApp = () => {
       setBookingForm({ seats: 1, notes: '' });
       setSelectedRide(null);
       fetchMyBookings();
-      fetchAllRides(); // Refresh to update available seats
+      fetchAllRides();
       
-    } catch (error) {
+    } catch (error: any) { // ✅ FIXED: Properly type the error
       console.error('Error booking ride:', error);
       toast({
         title: "Booking Failed",
-        description: error.message || "Failed to book the ride. Please try again.",
+        description: error?.message || "Failed to book the ride. Please try again.",
         variant: "destructive"
       });
     } finally {
@@ -190,6 +354,7 @@ export const PassengerApp = () => {
     }
   };
 
+  // ✅ FIXED: Type-safe handleSearch function
   const handleSearch = async () => {
     setLoading(true);
     try {
@@ -197,7 +362,7 @@ export const PassengerApp = () => {
         .from('rides')
         .select(`
           *,
-          profiles:driver_id (
+          profiles:rides_driver_id_fkey (
             full_name,
             phone,
             average_rating,
@@ -228,14 +393,73 @@ export const PassengerApp = () => {
       const { data, error } = await query.order('departure_date', { ascending: true });
 
       if (error) throw error;
-      setRides(data || []);
+      
+      // ✅ FIXED: Safe type casting using helper function
+      const typedResults = (data || []).map(mapToRide);
+      
+      setRides(typedResults);
+      console.log('Search results:', typedResults.length);
     } catch (error) {
       console.error('Error searching rides:', error);
-      toast({
-        title: "Error",
-        description: "Failed to search rides",
-        variant: "destructive"
-      });
+      
+      // Fallback search without joins
+      try {
+        let fallbackQuery = supabase
+          .from('rides')
+          .select('*')
+          .eq('is_active', true)
+          .gte('departure_date', new Date().toISOString().split('T')[0]);
+
+        if (searchForm.from) {
+          fallbackQuery = fallbackQuery.ilike('from_city', `%${searchForm.from}%`);
+        }
+        if (searchForm.to) {
+          fallbackQuery = fallbackQuery.ilike('to_city', `%${searchForm.to}%`);
+        }
+        if (searchForm.date) {
+          fallbackQuery = fallbackQuery.eq('departure_date', searchForm.date);
+        }
+        if (searchForm.seats) {
+          fallbackQuery = fallbackQuery.gte('available_seats', searchForm.seats);
+        }
+
+        const { data: searchResults, error: searchError } = await fallbackQuery.order('departure_date', { ascending: true });
+
+        if (searchError) throw searchError;
+
+        const resultsWithDetails = await Promise.all(
+          (searchResults || []).map(async (ride): Promise<Ride> => {
+            const { data: driverProfile } = await supabase
+              .from('profiles')
+              .select('full_name, phone, average_rating, total_ratings')
+              .eq('id', ride.driver_id)
+              .single();
+
+            const { data: vehicle } = await supabase
+              .from('vehicles')
+              .select('car_model, car_type, color')
+              .eq('id', ride.vehicle_id)
+              .single();
+
+            // ✅ FIXED: Use helper function for safe mapping
+            return mapToRide({
+              ...ride,
+              profiles: driverProfile,
+              vehicles: vehicle
+            });
+          })
+        );
+
+        setRides(resultsWithDetails);
+        console.log('Search results (fallback):', resultsWithDetails.length);
+      } catch (fallbackError) {
+        console.error('Fallback search failed:', fallbackError);
+        toast({
+          title: "Error",
+          description: "Failed to search rides",
+          variant: "destructive"
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -428,7 +652,7 @@ export const PassengerApp = () => {
                                 </h3>
                                 <div className="flex items-center gap-2 mt-1">
                                   <p className="text-sm text-muted-foreground">
-                                    Driver: {ride.profiles?.full_name}
+                                    Driver: {ride.profiles?.full_name || 'Unknown Driver'}
                                   </p>
                                   {ride.profiles?.average_rating && (
                                     <div className="flex items-center gap-1">
@@ -468,7 +692,7 @@ export const PassengerApp = () => {
                             {ride.vehicles && (
                               <div className="mt-3 pt-3 border-t">
                                 <p className="text-sm text-muted-foreground">
-                                  Vehicle: {ride.vehicles.car_model} ({ride.vehicles.car_type})
+                                  Vehicle: {ride.vehicles.car_model || 'Unknown'} ({ride.vehicles.car_type || 'Unknown'})
                                   {ride.vehicles.color && ` - ${ride.vehicles.color}`}
                                 </p>
                               </div>
@@ -505,11 +729,11 @@ export const PassengerApp = () => {
                                       <div className="flex items-center gap-3">
                                         <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
                                           <span className="font-semibold text-primary text-lg">
-                                            {selectedRide.profiles?.full_name.charAt(0)}
+                                            {selectedRide.profiles?.full_name?.charAt(0) || 'D'}
                                           </span>
                                         </div>
                                         <div className="flex-1">
-                                          <p className="font-medium">{selectedRide.profiles?.full_name}</p>
+                                          <p className="font-medium">{selectedRide.profiles?.full_name || 'Unknown Driver'}</p>
                                           <div className="flex items-center gap-2 text-sm">
                                             {selectedRide.profiles?.average_rating && (
                                               <>
@@ -633,10 +857,10 @@ export const PassengerApp = () => {
                             <div className="flex justify-between items-start mb-3">
                               <div>
                                 <h3 className="font-semibold">
-                                  {booking.rides?.from_city} → {booking.rides?.to_city}
+                                  {booking.rides?.from_city || 'N/A'} → {booking.rides?.to_city || 'N/A'}
                                 </h3>
                                 <p className="text-sm text-muted-foreground">
-                                  Driver: {booking.rides?.profiles?.full_name}
+                                  Driver: {booking.rides?.profiles?.full_name || 'Unknown Driver'}
                                 </p>
                               </div>
                               <div className="text-right">

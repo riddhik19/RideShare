@@ -48,7 +48,7 @@ interface Ride {
   departure_time: string;
   driver_id: string;
   from_city: string;
-  is_active: boolean;
+  status: string; // Changed from is_active to status
   notes: string | null;
   pickup_point: string;
   price_per_seat: number;
@@ -140,122 +140,168 @@ export const DriverApp = () => {
   };
 
   const fetchMyRides = async () => {
-    if (!profile?.id) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('rides')
-        .select(`
-          *,
-          vehicles (
-            car_model,
-            car_type,
-            color
+  if (!profile?.id) return;
+  setLoading(true);
+  try {
+    const { data, error } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        vehicles (
+          car_model,
+          car_type,
+          color
+        )
+      `)
+      .eq('driver_id', profile.id)
+      .eq('is_active', true)
+      .order('departure_date', { ascending: true });
+
+    if (error) throw error;
+
+    setMyRides(data || []);
+
+    // ✅ FIXED: Properly calculate today's rides
+    const today = new Date().toISOString().split('T')[0];
+    const todaysRides = (data || []).filter(ride => {
+      return ride.departure_date === today;
+    });
+
+    setTodaysRides(todaysRides);
+    setStats(prev => ({ ...prev, activeRides: todaysRides.length }));
+    
+    console.log('Active rides today:', todaysRides.length);
+  } catch (error) {
+    console.error('Error fetching rides:', error);
+    toast({
+      title: "Error",
+      description: "Failed to fetch your rides",
+      variant: "destructive"
+    });
+  } finally {
+    setLoading(false);
+  }
+};
+
+const fetchUpcomingRides = async () => {
+  if (!profile?.id) return;
+  try {
+    const now = new Date();
+    const todayString = now.toISOString().split('T')[0];
+    const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const oneWeekString = oneWeekFromNow.toISOString().split('T')[0];
+    
+    // ✅ FIXED: Get rides with confirmed bookings in the next 7 days
+    const { data: ridesWithBookings, error } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        vehicles (
+          car_model,
+          car_type,
+          color
+        ),
+        bookings!inner (
+          id,
+          seats_booked,
+          status,
+          passenger_id,
+          profiles:passenger_id (
+            full_name,
+            phone
           )
-        `)
-        .eq('driver_id', profile.id)
-        .eq('is_active', true)
-        .order('departure_date', { ascending: true });
+        )
+      `)
+      .eq('driver_id', profile.id)
+      .eq('is_active', true)
+      .eq('bookings.status', 'confirmed')
+      .gte('departure_date', todayString)
+      .lte('departure_date', oneWeekString)
+      .order('departure_date', { ascending: true });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setMyRides(data || []);
+    const typedData = (ridesWithBookings || []) as Ride[];
+    setUpcomingRides(typedData);
+    setStats(prev => ({ ...prev, upcomingRides: typedData.length }));
+    
+    console.log('Upcoming rides with bookings:', typedData.length);
+  } catch (error) {
+    console.error('Error fetching upcoming rides:', error);
+  }
+};
 
-      // Calculate active rides (only today's rides)
-      const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
-      const todaysRides = (data || []).filter(ride => {
-        return ride.departure_date === today;
-      });
+const fetchAllBookings = async () => {
+  if (!profile?.id) return;
+  try {
+    // ✅ FIXED: Use correct join syntax to avoid relationship ambiguity
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        *,
+        profiles:passenger_id (
+          full_name,
+          phone
+        ),
+        rides!bookings_ride_id_fkey (
+          from_city,
+          to_city,
+          departure_date,
+          departure_time,
+          driver_id
+        )
+      `)
+      .eq('rides.driver_id', profile.id)
+      .order('created_at', { ascending: false });
 
-      setTodaysRides(todaysRides);
-      setStats(prev => ({ ...prev, activeRides: todaysRides.length }));
-    } catch (error) {
-      console.error('Error fetching rides:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch your rides",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    if (error) throw error;
 
-  const fetchUpcomingRides = async () => {
-    if (!profile?.id) return;
+    // ✅ FIXED: Filter out bookings where rides is null (safety check)
+    const validBookings = (data || []).filter(booking => booking.rides);
+    
+    setAllBookings(validBookings);
+    setStats(prev => ({ ...prev, totalBookings: validBookings.length }));
+    
+    console.log('Total bookings:', validBookings.length);
+  } catch (error) {
+    console.error('Error fetching all bookings:', error);
+    // ✅ FIXED: Fallback approach if join fails
     try {
-      const now = new Date();
-      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      
-      const { data, error } = await supabase
+      // Get all rides by this driver first
+      const { data: driverRides } = await supabase
         .from('rides')
-        .select(`
-          *,
-          vehicles (
-            car_model,
-            car_type,
-            color
-          ),
-          bookings!inner (
-            id,
-            seats_booked,
-            status,
-            passenger_id,
+        .select('id')
+        .eq('driver_id', profile.id);
+      
+      if (driverRides && driverRides.length > 0) {
+        const rideIds = driverRides.map(ride => ride.id);
+        
+        // Get bookings for these rides
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select(`
+            *,
             profiles:passenger_id (
               full_name,
               phone
             )
-          )
-        `)
-        .eq('driver_id', profile.id)
-        .eq('is_active', true)
-        .eq('bookings.status', 'confirmed')
-        .gte('departure_date', now.toISOString().split('T')[0])
-        .lte('departure_date', oneWeekFromNow.toISOString().split('T')[0])
-        .order('departure_date', { ascending: true });
-
-      if (error) throw error;
-
-      // Type assertion to ensure proper typing
-      const typedData = (data || []) as Ride[];
-      setUpcomingRides(typedData);
-      setStats(prev => ({ ...prev, upcomingRides: typedData.length }));
-    } catch (error) {
-      console.error('Error fetching upcoming rides:', error);
+          `)
+          .in('ride_id', rideIds)
+          .order('created_at', { ascending: false });
+        
+        setAllBookings(bookings || []);
+        setStats(prev => ({ ...prev, totalBookings: (bookings || []).length }));
+        
+        console.log('Total bookings (fallback):', (bookings || []).length);
+      }
+    } catch (fallbackError) {
+      console.error('Fallback query also failed:', fallbackError);
+      setStats(prev => ({ ...prev, totalBookings: 0 }));
     }
-  };
+  }
+};
 
-  const fetchAllBookings = async () => {
-    if (!profile?.id) return;
-    try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
-          *,
-          profiles:passenger_id (
-            full_name,
-            phone
-          ),
-          rides!inner (
-            from_city,
-            to_city,
-            departure_date,
-            departure_time,
-            driver_id
-          )
-        `)
-        .eq('rides.driver_id', profile.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      setAllBookings(data || []);
-      setStats(prev => ({ ...prev, totalBookings: (data || []).length }));
-    } catch (error) {
-      console.error('Error fetching all bookings:', error);
-    }
-  };
-
+  // Fixed handleCancelRide function
   const handleCancelRide = async (rideId: string) => {
     if (!profile?.id) {
       toast({
@@ -269,17 +315,24 @@ export const DriverApp = () => {
     try {
       console.log('Attempting to cancel ride:', rideId);
       
-      const { data, error } = await supabase.rpc('cancel_ride', {
-        ride_id_param: rideId
-      });
+      // Update the ride status to 'cancelled' instead of using RPC function
+      const { data, error } = await supabase
+        .from('rides')
+        .update({ 
+          status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', rideId)
+        .eq('driver_id', profile.id) // Ensure only the driver can cancel their own ride
+        .select();
 
       if (error) {
-        console.error('RPC error:', error);
+        console.error('Update error:', error);
         throw error;
       }
 
-      if (!data) {
-        throw new Error('Ride not found or already cancelled, or you do not have permission to cancel this ride');
+      if (!data || data.length === 0) {
+        throw new Error('Ride not found or you do not have permission to cancel this ride');
       }
 
       console.log('Ride cancelled successfully');
@@ -314,9 +367,18 @@ export const DriverApp = () => {
   };
 
   const fetchMyBookings = async () => {
-    if (!profile?.id) return;
+  if (!profile?.id) return;
+  
+  try {
+    // Use the same fallback approach
+    const { data: driverRides } = await supabase
+      .from('rides')
+      .select('id')
+      .eq('driver_id', profile.id);
     
-    try {
+    if (driverRides && driverRides.length > 0) {
+      const rideIds = driverRides.map(ride => ride.id);
+      
       const { data, error } = await supabase
         .from('bookings')
         .select(`
@@ -325,24 +387,27 @@ export const DriverApp = () => {
             full_name,
             phone
           ),
-          rides!inner (
+          rides:ride_id (
             from_city,
             to_city,
             departure_date,
             departure_time
           )
         `)
-        .eq('rides.driver_id', profile.id)
+        .in('ride_id', rideIds)
         .order('created_at', { ascending: false })
         .limit(10);
 
       if (error) throw error;
-
       setMyBookings(data || []);
-    } catch (error) {
-      console.error('Error fetching bookings:', error);
+    } else {
+      setMyBookings([]);
     }
-  };
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    setMyBookings([]);
+  }
+};
 
   const handleLogout = async () => {
     try {

@@ -113,7 +113,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     
     setLoading(true);
     
-    // Declare rideData outside try block so it's accessible in catch
+    // Prepare the ride data with ALL required fields using the correct column names
     const rideData = {
       driver_id: user.id,
       vehicle_id: data.vehicleId,
@@ -127,34 +127,37 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       base_price: data.basePrice, // Add base_price field for seat pricing
       price_per_seat: data.basePrice, // Keep price_per_seat for backward compatibility
       notes: data.notes || null,
-      is_active: true, // Ensure the ride is active
+      status: 'active', // Use 'status' instead of 'is_active'
+      vehicle_type: null, // Add vehicle_type as null for now
+      departure_timestamp: `${format(data.departureDate, 'yyyy-MM-dd')} ${data.departureTime}:00+00`,
     };
     
     try {
       console.log('Attempting to insert ride data:', rideData);
-
       let result;
       
       if (editData) {
+        // For updates, make sure status is included
         result = await supabase
           .from('rides')
-          .update(rideData)
+          .update({
+            ...rideData,
+            updated_at: new Date().toISOString()
+          })
           .eq('id', editData.id)
           .select();
       } else {
+        // For inserts, use the complete rideData object
         result = await supabase
           .from('rides')
           .insert(rideData)
           .select();
       }
-
       console.log('Supabase result:', result);
-
       if (result.error) {
         console.error('Supabase error details:', result.error);
         throw result.error;
       }
-
       toast({
         title: 'Success',
         description: editData 
@@ -177,7 +180,10 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       
       if (error && typeof error === 'object' && 'message' in error) {
         const errorMsg = (error as { message: string }).message;
-        if (errorMsg.includes('duplicate key')) {
+        
+        if (errorMsg.includes('is_active')) {
+          errorMessage = 'Database schema issue. The ride status field is being updated.';
+        } else if (errorMsg.includes('duplicate key')) {
           errorMessage = 'A ride with these details already exists.';
         } else if (errorMsg.includes('foreign key')) {
           errorMessage = 'Please select a valid vehicle.';
