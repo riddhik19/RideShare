@@ -88,18 +88,19 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
     setSelectedSeat(seatId);
   };
 
+  // ✅ FIXED: Updated confirmBooking function with proper seat_id handling
   const confirmBooking = async () => {
     if (!selectedSeat || !layoutConfig) return;
-
+    
     setBookingInProgress(true);
     
     try {
-      // Check if seat is still available
+      // ✅ FIXED: Check if specific seat is still available
       const { data: existingBooking, error: checkError } = await supabase
         .from('bookings')
         .select('id')
         .eq('ride_id', ride.id)
-        .eq('seat_id', selectedSeat)
+        .eq('seat_id', selectedSeat) // Check specific seat
         .eq('status', 'confirmed')
         .single();
 
@@ -114,18 +115,19 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
       
       if (!seat) throw new Error('Seat not found');
 
+      // Calculate dynamic price based on seat type
       const basePrice = ride.base_price || ride.price_per_seat;
       let seatPrice = basePrice;
       if (seat.type === 'front') seatPrice += 100;
       else if (seat.type === 'window') seatPrice += 50;
 
-      // Create booking
+      // ✅ FIXED: Create booking with specific seat_id
       const { data: booking, error: bookingError } = await supabase
         .from('bookings')
         .insert({
           ride_id: ride.id,
           passenger_id: userId,
-          seat_id: selectedSeat,
+          seat_id: selectedSeat, // ✅ Store specific seat
           seats_booked: 1,
           total_price: seatPrice,
           status: 'confirmed',
@@ -136,14 +138,31 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
 
       if (bookingError) throw bookingError;
 
+      // ✅ FIXED: Update available seats in ride
+      const { error: updateError } = await supabase
+        .from('rides')
+        .update({ 
+          available_seats: ride.available_seats - 1 
+        })
+        .eq('id', ride.id);
+
+      if (updateError) throw updateError;
+
+      // Refresh bookings to show the new booking
+      await fetchBookings();
+
       toast({
         title: 'Booking Confirmed!',
         description: `Seat ${selectedSeat} booked successfully for ₹${seatPrice}`,
       });
 
+      // Reset selection
+      setSelectedSeat(null);
+
       onBookingComplete?.(booking);
       
     } catch (error: any) {
+      console.error('Booking error:', error);
       toast({
         title: 'Booking Failed',
         description: error.message || 'Failed to book seat. Please try again.',

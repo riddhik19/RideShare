@@ -53,7 +53,7 @@ interface Ride {
   total_seats: number | null;
   vehicle_type: string | null;
   notes: string | null;
-  is_active: boolean;
+  status: string;
   created_at: string;
   updated_at: string;
   // Optional joined data
@@ -101,7 +101,7 @@ const mapToRide = (data: any): Ride => ({
   total_seats: data.total_seats ?? null,
   vehicle_type: data.vehicle_type ?? null,
   notes: data.notes,
-  is_active: data.is_active,
+  status: data.status,
   created_at: data.created_at,
   updated_at: data.updated_at,
   profiles: data.profiles || null,
@@ -180,7 +180,7 @@ export const PassengerApp = () => {
     fetchMyBookings();
   }, []);
 
-  // ✅ FIXED: Type-safe fetchAllRides function
+  // ✅ FIXED: Updated fetchAllRides function with correct status and profile reference
   const fetchAllRides = async () => {
     setLoading(true);
     try {
@@ -188,19 +188,10 @@ export const PassengerApp = () => {
         .from('rides')
         .select(`
           *,
-          profiles:rides_driver_id_fkey (
-            full_name,
-            phone,
-            average_rating,
-            total_ratings
-          ),
-          vehicles (
-            car_model,
-            car_type,
-            color
-          )
+          profiles:driver_id (*),
+          vehicles (*)
         `)
-        .eq('is_active', true)
+        .eq('status', 'active')
         .gte('departure_date', new Date().toISOString().split('T')[0])
         .order('departure_date', { ascending: true });
 
@@ -219,7 +210,7 @@ export const PassengerApp = () => {
         const { data: ridesOnly, error: ridesError } = await supabase
           .from('rides')
           .select('*')
-          .eq('is_active', true)
+          .eq('status', 'active')
           .gte('departure_date', new Date().toISOString().split('T')[0])
           .order('departure_date', { ascending: true });
 
@@ -354,7 +345,7 @@ export const PassengerApp = () => {
     }
   };
 
-  // ✅ FIXED: Type-safe handleSearch function
+  // ✅ FIXED: Updated handleSearch function with correct status and profile reference
   const handleSearch = async () => {
     setLoading(true);
     try {
@@ -362,19 +353,10 @@ export const PassengerApp = () => {
         .from('rides')
         .select(`
           *,
-          profiles:rides_driver_id_fkey (
-            full_name,
-            phone,
-            average_rating,
-            total_ratings
-          ),
-          vehicles (
-            car_model,
-            car_type,
-            color
-          )
+          profiles:driver_id (*),
+          vehicles (*)
         `)
-        .eq('is_active', true)
+        .eq('status', 'active')
         .gte('departure_date', new Date().toISOString().split('T')[0]);
 
       if (searchForm.from) {
@@ -407,7 +389,7 @@ export const PassengerApp = () => {
         let fallbackQuery = supabase
           .from('rides')
           .select('*')
-          .eq('is_active', true)
+          .eq('status', 'active')
           .gte('departure_date', new Date().toISOString().split('T')[0]);
 
         if (searchForm.from) {

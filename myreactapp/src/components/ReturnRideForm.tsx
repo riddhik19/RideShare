@@ -81,7 +81,7 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
     setLoading(true);
     
     try {
-      // ✅ FIXED: Corrected field mapping to match database schema
+      // ✅ FIXED: Use correct database field names
       const returnRideData = {
         driver_id: user.id,
         vehicle_id: originalRide.vehicleId,
@@ -91,12 +91,13 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
         departure_time: data.returnTime!,
         pickup_point: data.returnPickupPoint!,
         available_seats: data.returnAvailableSeats!,
-        price_per_seat: data.returnPricePerSeat!, // Use correct field name
+        total_seats: data.returnAvailableSeats!, // Set total_seats
+        price_per_seat: data.returnPricePerSeat!,
+        base_price: data.returnPricePerSeat!, // Set base_price for dynamic pricing
         notes: data.returnNotes || null,
-        is_active: true,
-        // Add these fields if they exist in your schema (from migrations)
-        ...(data.returnAvailableSeats && { total_seats: data.returnAvailableSeats }),
-        ...(data.returnPricePerSeat && { base_price: data.returnPricePerSeat })
+        status: 'active', // ✅ Use 'status' instead of 'is_active'
+        vehicle_type: null,
+        departure_timestamp: `${format(data.returnDate!, 'yyyy-MM-dd')} ${data.returnTime!}:00+00`,
       };
 
       console.log('Inserting return ride with data:', returnRideData);
@@ -119,13 +120,7 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
         description: 'Return ride posted successfully!',
       });
       
-      onSuccess({
-        fromCity: originalRide.toCity,
-        toCity: originalRide.fromCity,
-        departureDate: data.returnDate,
-        departureTime: data.returnTime,
-        id: insertedRide.id
-      });
+      onSuccess(insertedRide);
     } catch (error: unknown) {
       console.error('Error posting return ride:', error);
       

@@ -1,5 +1,5 @@
 // /src/components/SeatVisualization.tsx
-// FIXED - Enhanced Interactive Seat Map for your database structure
+// Enhanced Interactive Seat Map for your database structure
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,7 +42,7 @@ export const SeatVisualization: React.FC<SeatVisualizationProps> = ({
   const [loading, setLoading] = useState(false);
   const [currentBookedSeats, setCurrentBookedSeats] = useState<BookedSeat[]>(bookedSeats);
 
-  // Real-time subscription to seat bookings (FIXED: use 'bookings' table)
+  // Real-time subscription to seat bookings
   useEffect(() => {
     const subscription = supabase
       .channel(`ride-${rideId}-seats`)
@@ -50,7 +50,7 @@ export const SeatVisualization: React.FC<SeatVisualizationProps> = ({
         { 
           event: '*', 
           schema: 'public', 
-          table: 'bookings',  // FIXED: Changed from 'ride_bookings' to 'bookings'
+          table: 'bookings',
           filter: `ride_id=eq.${rideId}`
         }, 
         (payload) => {
@@ -67,22 +67,22 @@ export const SeatVisualization: React.FC<SeatVisualizationProps> = ({
 
   const fetchLatestBookings = async () => {
     try {
-      // FIXED: Use 'bookings' table with correct column names
+      // Get seat-specific bookings only
       const { data, error } = await supabase
-        .from('bookings')  // FIXED: Changed from 'ride_bookings'
-        .select('seat_id, passenger_id, created_at, total_price')  // FIXED: Changed 'price' to 'total_price'
+        .from('bookings')
+        .select('seat_id, passenger_id, created_at, total_price')
         .eq('ride_id', rideId)
         .eq('status', 'confirmed')
-        .not('seat_id', 'is', null);  // Only get seat-specific bookings
+        .not('seat_id', 'is', null); // Only get seat-specific bookings
 
       if (error) throw error;
 
-      // FIXED: Map the correct column names
+      // Map the correct column names
       const bookings: BookedSeat[] = data.map(booking => ({
-        seatId: booking.seat_id!,  // FIXED: Use seat_id correctly
-        passengerId: booking.passenger_id,  // FIXED: Use passenger_id correctly
-        bookedAt: booking.created_at,  // FIXED: Use created_at correctly
-        price: booking.total_price  // FIXED: Use total_price instead of price
+        seatId: booking.seat_id!,
+        passengerId: booking.passenger_id,
+        bookedAt: booking.created_at,
+        price: booking.total_price
       }));
 
       setCurrentBookedSeats(bookings);
