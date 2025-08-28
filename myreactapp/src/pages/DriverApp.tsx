@@ -48,7 +48,7 @@ interface Ride {
   departure_time: string;
   driver_id: string;
   from_city: string;
-  status: string; // Changed from is_active to status
+  status: string;
   notes: string | null;
   pickup_point: string;
   price_per_seat: number;
@@ -154,14 +154,14 @@ export const DriverApp = () => {
           )
         `)
         .eq('driver_id', profile.id)
-        .eq('status', 'active') // ✅ FIXED: Changed from is_active to status
+        .eq('status', 'active')
         .order('departure_date', { ascending: true });
 
       if (error) throw error;
 
       setMyRides(data || []);
 
-      // ✅ FIXED: Properly calculate today's rides
+      // Calculate today's rides
       const today = new Date().toISOString().split('T')[0];
       const todaysRides = (data || []).filter(ride => {
         return ride.departure_date === today;
@@ -191,7 +191,7 @@ export const DriverApp = () => {
       const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       const oneWeekString = oneWeekFromNow.toISOString().split('T')[0];
       
-      // ✅ FIXED: Get rides with confirmed bookings in the next 7 days
+      // Get rides with confirmed bookings in the next 7 days
       const { data: ridesWithBookings, error } = await supabase
         .from('rides')
         .select(`
@@ -213,7 +213,7 @@ export const DriverApp = () => {
           )
         `)
         .eq('driver_id', profile.id)
-        .eq('status', 'active') // ✅ FIXED: Changed from is_active to status
+        .eq('status', 'active')
         .eq('bookings.status', 'confirmed')
         .gte('departure_date', todayString)
         .lte('departure_date', oneWeekString)
@@ -234,7 +234,7 @@ export const DriverApp = () => {
   const fetchAllBookings = async () => {
     if (!profile?.id) return;
     try {
-      // ✅ FIXED: Use correct join syntax to avoid relationship ambiguity
+      // Use correct join syntax to avoid relationship ambiguity
       const { data, error } = await supabase
         .from('bookings')
         .select(`
@@ -256,7 +256,7 @@ export const DriverApp = () => {
 
       if (error) throw error;
 
-      // ✅ FIXED: Filter out bookings where rides is null (safety check)
+      // Filter out bookings where rides is null (safety check)
       const validBookings = (data || []).filter(booking => booking.rides);
       
       setAllBookings(validBookings);
@@ -265,7 +265,7 @@ export const DriverApp = () => {
       console.log('Total bookings:', validBookings.length);
     } catch (error) {
       console.error('Error fetching all bookings:', error);
-      // ✅ FIXED: Fallback approach if join fails
+      // Fallback approach if join fails
       try {
         // Get all rides by this driver first
         const { data: driverRides } = await supabase
@@ -301,7 +301,7 @@ export const DriverApp = () => {
     }
   };
 
-  // ✅ FIXED: handleCancelRide function - using status instead of is_active
+  // Updated handleCancelRide function - using status instead of is_active
   const handleCancelRide = async (rideId: string) => {
     if (!profile?.id) {
       toast({
@@ -315,11 +315,11 @@ export const DriverApp = () => {
     try {
       console.log('Attempting to cancel ride:', rideId);
       
-      // ✅ FIXED: Update the ride status to 'cancelled' instead of using is_active
+      // Update the ride status to 'cancelled' instead of using is_active
       const { data, error } = await supabase
         .from('rides')
         .update({ 
-          status: 'cancelled', // ✅ FIXED: Changed from is_active: false to status: 'cancelled'
+          status: 'cancelled',
           updated_at: new Date().toISOString()
         })
         .eq('id', rideId)

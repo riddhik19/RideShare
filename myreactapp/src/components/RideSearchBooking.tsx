@@ -1,5 +1,5 @@
 // /src/components/RideSearchBooking.tsx
-// Fixed version with all imports and correct syntax
+// Fixed version with correct status field and all imports
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -42,83 +42,108 @@ export const RideSearchBooking: React.FC<RideSearchBookingProps> = ({ userId }) 
   const [selectedRide, setSelectedRide] = useState<RideSearchResult | null>(null);
   const [searching, setSearching] = useState(false);
 
-  // Fixed RideSearchBooking.tsx - corrected search query
-// Replace the searchRides function in RideSearchBooking.tsx
+  // ✅ FIXED: Updated searchRides function with correct status field
+  const searchRides = async () => {
+    if (!fromLocation || !toLocation || !searchDate) {
+      toast({
+        title: 'Missing Information',
+        description: 'Please fill in all search fields',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-const searchRides = async () => {
-  if (!fromLocation || !toLocation || !searchDate) {
-    toast({
-      title: 'Missing Information',
-      description: 'Please fill in all search fields',
-      variant: 'destructive',
-    });
-    return;
-  }
-
-  setSearching(true);
-  
-  try {
-    // ✅ FIXED: Use explicit relationship path to avoid ambiguity
-    const { data: rides, error } = await supabase
-      .from('rides')
-      .select(`
-        *,
-        profiles:rides_driver_id_fkey (
-          full_name,
-          average_rating
-        ),
-        vehicles:vehicle_id (
-          car_model,
-          car_type
-        )
-      `)
-      .ilike('from_city', `%${fromLocation}%`)
-      .ilike('to_city', `%${toLocation}%`)
-      .eq('departure_date', searchDate)
-      .eq('is_active', true)
-      .gt('available_seats', 0)
-      .order('departure_time', { ascending: true });
-
-    if (error) {
-      // ✅ FIXED: Fallback approach if explicit relationship fails
-      console.warn('Primary query failed, trying fallback:', error);
-      
-      const { data: ridesOnly, error: fallbackError } = await supabase
+    setSearching(true);
+    
+    try {
+      // ✅ FIXED: Use correct foreign key relationship and 'status' field
+      const { data: rides, error } = await supabase
         .from('rides')
-        .select('*')
+        .select(`
+          *,
+          profiles:driver_id (
+            full_name,
+            average_rating
+          ),
+          vehicles:vehicle_id (
+            car_model,
+            car_type
+          )
+        `)
         .ilike('from_city', `%${fromLocation}%`)
         .ilike('to_city', `%${toLocation}%`)
         .eq('departure_date', searchDate)
-        .eq('is_active', true)
+        .eq('status', 'active')
         .gt('available_seats', 0)
         .order('departure_time', { ascending: true });
 
-      if (fallbackError) throw fallbackError;
+      if (error) {
+        // Fallback approach if join fails
+        console.warn('Primary query failed, trying fallback:', error);
+        
+        const { data: ridesOnly, error: fallbackError } = await supabase
+          .from('rides')
+          .select('*')
+          .ilike('from_city', `%${fromLocation}%`)
+          .ilike('to_city', `%${toLocation}%`)
+          .eq('departure_date', searchDate)
+          .eq('status', 'active')
+          .gt('available_seats', 0)
+          .order('departure_time', { ascending: true });
 
-      // Get driver and vehicle details separately
-      const ridesWithDetails = await Promise.all(
-        (ridesOnly || []).map(async (ride) => {
-          const { data: driverProfile } = await supabase
-            .from('profiles')
-            .select('full_name, average_rating')
-            .eq('id', ride.driver_id)
-            .single();
+        if (fallbackError) throw fallbackError;
 
-          const { data: vehicle } = await supabase
-            .from('vehicles')
-            .select('car_model, car_type')
-            .eq('id', ride.vehicle_id)
-            .single();
+        // Get driver and vehicle details separately
+        const ridesWithDetails = await Promise.all(
+          (ridesOnly || []).map(async (ride) => {
+            const { data: driverProfile } = await supabase
+              .from('profiles')
+              .select('full_name, average_rating')
+              .eq('id', ride.driver_id)
+              .single();
 
-          return {
-            ...ride,
-            profiles: driverProfile,
-            vehicles: vehicle
-          };
-        })
-      );
+            const { data: vehicle } = await supabase
+              .from('vehicles')
+              .select('car_model, car_type')
+              .eq('id', ride.vehicle_id)
+              .single();
 
-      const results: RideSearchResult[] = ridesWithDetails.map(ride => ({
+            return {
+              ...ride,
+              profiles: driverProfile,
+              vehicles: vehicle
+            };
+          })
+        );
+
+        const results: RideSearchResult[] = ridesWithDetails.map(ride => ({
+          id: ride.id,
+          from_city: ride.from_city,
+          to_city: ride.to_city,
+          departure_date: ride.departure_date,
+          departure_time: ride.departure_time,
+          price_per_seat: ride.price_per_seat,
+          available_seats: ride.available_seats,
+          total_seats: ride.total_seats,
+          base_price: ride.base_price,
+          vehicle_type: ride.vehicle_type,
+          driver_name: ride.profiles?.full_name || 'Unknown Driver',
+          driver_rating: ride.profiles?.average_rating || 4.5,
+          car_model: ride.vehicles?.car_model || 'Car',
+          car_type: ride.vehicles?.car_type || 'Standard'
+        }));
+
+        setSearchResults(results);
+        if (results.length === 0) {
+          toast({
+            title: 'No Rides Found',
+            description: 'No rides available for your search criteria',
+          });
+        }
+        return;
+      }
+
+      const results: RideSearchResult[] = rides.map(ride => ({
         id: ride.id,
         from_city: ride.from_city,
         to_city: ride.to_city,
@@ -136,52 +161,25 @@ const searchRides = async () => {
       }));
 
       setSearchResults(results);
+
       if (results.length === 0) {
         toast({
           title: 'No Rides Found',
           description: 'No rides available for your search criteria',
         });
       }
-      return;
-    }
 
-    const results: RideSearchResult[] = rides.map(ride => ({
-      id: ride.id,
-      from_city: ride.from_city,
-      to_city: ride.to_city,
-      departure_date: ride.departure_date,
-      departure_time: ride.departure_time,
-      price_per_seat: ride.price_per_seat,
-      available_seats: ride.available_seats,
-      total_seats: ride.total_seats,
-      base_price: ride.base_price,
-      vehicle_type: ride.vehicle_type,
-      driver_name: ride.profiles?.full_name || 'Unknown Driver',
-      driver_rating: ride.profiles?.average_rating || 4.5,
-      car_model: ride.vehicles?.car_model || 'Car',
-      car_type: ride.vehicles?.car_type || 'Standard'
-    }));
-
-    setSearchResults(results);
-
-    if (results.length === 0) {
+    } catch (error: any) {
+      console.error('Search error:', error);
       toast({
-        title: 'No Rides Found',
-        description: 'No rides available for your search criteria',
+        title: 'Search Failed',
+        description: error.message || 'Failed to search for rides',
+        variant: 'destructive',
       });
+    } finally {
+      setSearching(false);
     }
-
-  } catch (error: any) {
-    console.error('Search error:', error);
-    toast({
-      title: 'Search Failed',
-      description: error.message || 'Failed to search for rides',
-      variant: 'destructive',
-    });
-  } finally {
-    setSearching(false);
-  }
-};
+  };
 
   const handleBookingComplete = (bookingData: any) => {
     toast({

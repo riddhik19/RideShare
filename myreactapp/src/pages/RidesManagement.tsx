@@ -20,7 +20,7 @@ interface Ride {
   available_seats: number;
   price_per_seat: number;
   notes?: string | null;
-  is_active: boolean;
+  status: string;
   created_at: string;
   bookings?: Booking[];
 }
@@ -57,7 +57,7 @@ const RidesManagement: React.FC = () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       
-      // Fetch active rides (today and future)
+      // Fetch active rides (today and future) with status = 'active'
       const { data: activeData, error: activeError } = await supabase
         .from('rides')
         .select(`
@@ -77,12 +77,13 @@ const RidesManagement: React.FC = () => {
           )
         `)
         .eq('driver_id', profile?.id ?? '')
+        .eq('status', 'active')
         .gte('departure_date', today)
         .order('departure_date', { ascending: true });
 
       if (activeError) throw activeError;
 
-      // Fetch past rides
+      // Fetch past rides (all statuses for historical view)
       const { data: pastData, error: pastError } = await supabase
         .from('rides')
         .select(`
@@ -132,6 +133,19 @@ const RidesManagement: React.FC = () => {
     return <Badge variant={variants[status as keyof typeof variants] || 'outline'}>{status}</Badge>;
   };
 
+  const getRideStatusBadge = (status: string) => {
+    switch (status) {
+      case 'active':
+        return <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>;
+      case 'cancelled':
+        return <Badge variant="destructive">Cancelled</Badge>;
+      case 'completed':
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Completed</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
       weekday: 'short',
@@ -140,18 +154,25 @@ const RidesManagement: React.FC = () => {
     });
   };
 
-  const toggleRideStatus = async (rideId: string, currentStatus: boolean) => {
+  // Updated toggleRideStatus function with proper status handling
+  const toggleRideStatus = async (rideId: string, currentStatus: string) => {
     try {
+      // Toggle between 'active' and 'cancelled' status
+      const newStatus = currentStatus === 'active' ? 'cancelled' : 'active';
+      
       const { error } = await supabase
         .from('rides')
-        .update({ is_active: !currentStatus })
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', rideId);
 
       if (error) throw error;
 
       toast({
         title: "Success",
-        description: `Ride ${!currentStatus ? 'activated' : 'deactivated'} successfully`
+        description: `Ride ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`
       });
 
       fetchMyRides();
@@ -172,11 +193,7 @@ const RidesManagement: React.FC = () => {
           <div className="flex-1">
             <CardTitle className="text-xl mb-2 flex items-center gap-2">
               {ride.from_city} → {ride.to_city}
-              {ride.is_active ? (
-                <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>
-              ) : (
-                <Badge variant="secondary">Inactive</Badge>
-              )}
+              {getRideStatusBadge(ride.status)}
             </CardTitle>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -270,9 +287,9 @@ const RidesManagement: React.FC = () => {
             <Button 
               variant="outline" 
               size="sm"
-              onClick={() => toggleRideStatus(ride.id, ride.is_active)}
+              onClick={() => toggleRideStatus(ride.id, ride.status)}
             >
-              {ride.is_active ? 'Deactivate' : 'Activate'}
+              {ride.status === 'active' ? 'Deactivate' : 'Activate'}
             </Button>
             
             <Button variant="outline" size="sm">

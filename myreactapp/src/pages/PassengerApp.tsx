@@ -180,7 +180,7 @@ export const PassengerApp = () => {
     fetchMyBookings();
   }, []);
 
-  // ✅ FIXED: Updated fetchAllRides function with correct status and profile reference
+  // ✅ FIXED: Updated fetchAllRides function with correct status field
   const fetchAllRides = async () => {
     setLoading(true);
     try {
@@ -345,7 +345,7 @@ export const PassengerApp = () => {
     }
   };
 
-  // ✅ FIXED: Updated handleSearch function with correct status and profile reference
+  // ✅ FIXED: Updated handleSearch function with correct status field
   const handleSearch = async () => {
     setLoading(true);
     try {

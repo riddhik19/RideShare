@@ -113,7 +113,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     
     setLoading(true);
     
-    // ✅ FIXED: Use correct database field names
+    // Updated: Use correct database field names and remove departure_timestamp
     const rideData = {
       driver_id: user.id,
       vehicle_id: data.vehicleId,
@@ -123,13 +123,12 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       departure_time: data.departureTime,
       pickup_point: data.pickupPoint,
       available_seats: data.availableSeats,
-      total_seats: data.availableSeats, // ✅ Set total_seats to match available_seats initially
-      base_price: data.basePrice, // ✅ Set base_price for dynamic pricing
-      price_per_seat: data.basePrice, // Keep price_per_seat for backward compatibility
+      total_seats: data.availableSeats,
+      base_price: data.basePrice,
+      price_per_seat: data.basePrice,
       notes: data.notes || null,
-      status: 'active', // ✅ Use 'status' instead of 'is_active'
-      vehicle_type: null, // ✅ Add vehicle_type as null for now
-      departure_timestamp: `${format(data.departureDate, 'yyyy-MM-dd')} ${data.departureTime}:00+00`, // ✅ Add departure_timestamp
+      status: 'active',
+      vehicle_type: null,
     };
     
     try {

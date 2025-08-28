@@ -81,7 +81,7 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
     setLoading(true);
     
     try {
-      // ✅ FIXED: Use correct database field names
+      // Updated: Use correct database field names and remove departure_timestamp
       const returnRideData = {
         driver_id: user.id,
         vehicle_id: originalRide.vehicleId,
@@ -95,9 +95,8 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
         price_per_seat: data.returnPricePerSeat!,
         base_price: data.returnPricePerSeat!, // Set base_price for dynamic pricing
         notes: data.returnNotes || null,
-        status: 'active', // ✅ Use 'status' instead of 'is_active'
+        status: 'active',
         vehicle_type: null,
-        departure_timestamp: `${format(data.returnDate!, 'yyyy-MM-dd')} ${data.returnTime!}:00+00`,
       };
 
       console.log('Inserting return ride with data:', returnRideData);

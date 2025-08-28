@@ -796,7 +796,7 @@ export const Constants = {
   },
 } as const
 
-// ========== NEW HELPER TYPES FOR SEAT BOOKING ==========
+// ========== HELPER TYPES FOR SEAT BOOKING ==========
 export type Ride = Database['public']['Tables']['rides']['Row'];
 export type RideInsert = Database['public']['Tables']['rides']['Insert'];
 export type RideUpdate = Database['public']['Tables']['rides']['Update'];
@@ -827,8 +827,8 @@ export interface BookedSeat {
 
 export interface RideSearchResult {
   id: string;
-  from_city: string; // Fixed: was from_location
-  to_city: string; // Fixed: was to_location  
+  from_city: string;
+  to_city: string;
   departure_time: string;
   base_price: number;
   available_seats: number;

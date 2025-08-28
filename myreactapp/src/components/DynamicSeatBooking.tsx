@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { SeatVisualization } from '@/components/SeatVisualization';
+import RedBusStyleSeatLayout from '@/components/RedBusStyleSeatLayout';
+
 import { 
   LayoutConfig, 
   BookedSeat, 
@@ -88,21 +89,25 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
     setSelectedSeat(seatId);
   };
 
-  // ✅ FIXED: Updated confirmBooking function with proper seat_id handling
+  // Updated confirmBooking function with proper seat_id handling
   const confirmBooking = async () => {
     if (!selectedSeat || !layoutConfig) return;
     
     setBookingInProgress(true);
     
     try {
-      // ✅ FIXED: Check if specific seat is still available
+      // Check if specific seat is still available
       const { data: existingBooking, error: checkError } = await supabase
         .from('bookings')
         .select('id')
         .eq('ride_id', ride.id)
         .eq('seat_id', selectedSeat) // Check specific seat
         .eq('status', 'confirmed')
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single
+
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" error
+        throw checkError;
+      }
 
       if (existingBooking) {
         throw new Error('Seat has been booked by another passenger');
@@ -121,28 +126,29 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
       if (seat.type === 'front') seatPrice += 100;
       else if (seat.type === 'window') seatPrice += 50;
 
-      // ✅ FIXED: Create booking with specific seat_id
+      // Create booking with proper field mapping
       const { data: booking, error: bookingError } = await supabase
         .from('bookings')
         .insert({
           ride_id: ride.id,
           passenger_id: userId,
-          seat_id: selectedSeat, // ✅ Store specific seat
+          seat_id: selectedSeat,
           seats_booked: 1,
           total_price: seatPrice,
           status: 'confirmed',
-          booking_date: new Date().toISOString()
+          selected_seats: [selectedSeat] // Also store in selected_seats array
         })
         .select()
         .single();
 
       if (bookingError) throw bookingError;
 
-      // ✅ FIXED: Update available seats in ride
+      // Update available seats in ride
       const { error: updateError } = await supabase
         .from('rides')
         .update({ 
-          available_seats: ride.available_seats - 1 
+          available_seats: ride.available_seats - 1,
+          updated_at: new Date().toISOString()
         })
         .eq('id', ride.id);
 
@@ -212,15 +218,15 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
       </Card>
 
       {/* Seat Selection */}
-      <SeatVisualization
-        rideId={ride.id}
-        layoutConfig={layoutConfig}
-        basePrice={basePrice}
-        bookedSeats={bookedSeats}
-        onSeatSelect={handleSeatSelect}
-        userId={userId}
-        readOnly={false}
-      />
+        <RedBusStyleSeatLayout
+          rideId={ride.id}
+          totalSeats={ride.total_seats || 5}
+          availableSeats={ride.available_seats}
+          basePrice={ride.base_price || ride.price_per_seat}
+          bookedSeats={bookedSeats.map(seat => seat.seatId)}
+          onSeatSelect={handleSeatSelect}
+          vehicleType="sedan"
+        />
 
       {/* Booking Confirmation */}
       {selectedSeat && (
