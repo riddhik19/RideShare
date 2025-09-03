@@ -108,12 +108,12 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     }
   };
 
+  
   const onSubmit = async (data: PostRideFormData) => {
     if (!user) return;
     
     setLoading(true);
     
-    // Updated: Use correct database field names and remove departure_timestamp
     const rideData = {
       driver_id: user.id,
       vehicle_id: data.vehicleId,
@@ -127,7 +127,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       base_price: data.basePrice,
       price_per_seat: data.basePrice,
       notes: data.notes || null,
-      status: 'active',
+      status: 'active', // ✅ FIXED: Use status instead of is_active
       vehicle_type: null,
     };
     
@@ -234,6 +234,8 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       setCurrentStep('return');
     }
   };
+
+  
 
   const watchedValues = form.watch();
   const canShowRoute = watchedValues.fromCity && watchedValues.toCity;

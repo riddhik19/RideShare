@@ -53,74 +53,74 @@ const RidesManagement: React.FC = () => {
     fetchMyRides();
   }, [profile?.id]);
 
-  const fetchMyRides = async () => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      // Fetch active rides (today and future) with status = 'active'
-      const { data: activeData, error: activeError } = await supabase
-        .from('rides')
-        .select(`
-          *,
-          bookings (
-            id,
-            seats_booked,
-            total_price,
-            status,
-            passenger_notes,
-            created_at,
-            profiles:passenger_id (
-              full_name,
-              phone,
-              avatar_url
-            )
+  // Replace fetchMyRides in RidesManagement.tsx (around line 50)
+const fetchMyRides = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    const { data: activeData, error: activeError } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        bookings (
+          id,
+          seats_booked,
+          total_price,
+          status,
+          passenger_notes,
+          created_at,
+          profiles:passenger_id (
+            full_name,
+            phone,
+            avatar_url
           )
-        `)
-        .eq('driver_id', profile?.id ?? '')
-        .eq('status', 'active')
-        .gte('departure_date', today)
-        .order('departure_date', { ascending: true });
+        )
+      `)
+      .eq('driver_id', profile?.id ?? '')
+      .eq('status', 'active') // ✅ FIXED: Use status field
+      .gte('departure_date', today)
+      .order('departure_date', { ascending: true });
 
-      if (activeError) throw activeError;
+    if (activeError) throw activeError;
 
-      // Fetch past rides (all statuses for historical view)
-      const { data: pastData, error: pastError } = await supabase
-        .from('rides')
-        .select(`
-          *,
-          bookings (
-            id,
-            seats_booked,
-            total_price,
-            status,
-            passenger_notes,
-            created_at,
-            profiles:passenger_id (
-              full_name,
-              phone,
-              avatar_url
-            )
+    const { data: pastData, error: pastError } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        bookings (
+          id,
+          seats_booked,
+          total_price,
+          status,
+          passenger_notes,
+          created_at,
+          profiles:passenger_id (
+            full_name,
+            phone,
+            avatar_url
           )
-        `)
-        .eq('driver_id', profile?.id ?? '')
-        .lt('departure_date', today)
-        .order('departure_date', { ascending: false });
+        )
+      `)
+      .eq('driver_id', profile?.id ?? '')
+      .in('status', ['cancelled', 'completed']) // ✅ FIXED: Use status field
+      .lt('departure_date', today)
+      .order('departure_date', { ascending: false });
 
-      if (pastError) throw pastError;
+    if (pastError) throw pastError;
 
-      setActiveRides((activeData as Ride[]) || []);
-      setPastRides((pastData as Ride[]) || []);
-    } catch (error) {
-      console.error('Error fetching rides:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch rides",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    setActiveRides((activeData as Ride[]) || []);
+    setPastRides((pastData as Ride[]) || []);
+  } catch (error) {
+    console.error('Error fetching rides:', error);
+    toast({
+      title: "Error",
+      description: "Failed to fetch rides",
+      variant: "destructive"
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const getStatusBadge = (status: string) => {
     const variants = {
@@ -155,37 +155,36 @@ const RidesManagement: React.FC = () => {
   };
 
   // Updated toggleRideStatus function with proper status handling
-  const toggleRideStatus = async (rideId: string, currentStatus: string) => {
-    try {
-      // Toggle between 'active' and 'cancelled' status
-      const newStatus = currentStatus === 'active' ? 'cancelled' : 'active';
-      
-      const { error } = await supabase
-        .from('rides')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', rideId);
+  // Replace toggleRideStatus function
+const toggleRideStatus = async (rideId: string, currentStatus: string) => {
+  try {
+    const newStatus = currentStatus === 'active' ? 'cancelled' : 'active';
+    
+    const { error } = await supabase
+      .from('rides')
+      .update({ 
+        status: newStatus, // ✅ FIXED: Use status field
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', rideId);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      toast({
-        title: "Success",
-        description: `Ride ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`
-      });
+    toast({
+      title: "Success",
+      description: `Ride ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`
+    });
 
-      fetchMyRides();
-    } catch (error) {
-      console.error('Error updating ride status:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update ride status",
-        variant: "destructive"
-      });
-    }
-  };
-
+    fetchMyRides();
+  } catch (error) {
+    console.error('Error updating ride status:', error);
+    toast({
+      title: "Error",
+      description: "Failed to update ride status",
+      variant: "destructive"
+    });
+  }
+};
   const RideCard: React.FC<{ ride: Ride; showActions?: boolean }> = ({ ride, showActions = true }) => (
     <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-primary">
       <CardHeader className="pb-3">

@@ -90,94 +90,91 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
   };
 
   // Updated confirmBooking function with proper seat_id handling
-  const confirmBooking = async () => {
-    if (!selectedSeat || !layoutConfig) return;
-    
-    setBookingInProgress(true);
-    
-    try {
-      // Check if specific seat is still available
-      const { data: existingBooking, error: checkError } = await supabase
-        .from('bookings')
-        .select('id')
-        .eq('ride_id', ride.id)
-        .eq('seat_id', selectedSeat) // Check specific seat
-        .eq('status', 'confirmed')
-        .maybeSingle(); // Use maybeSingle instead of single
+  // Update confirmBooking function in DynamicSeatBooking.tsx (around line 80)
+const confirmBooking = async () => {
+  if (!selectedSeat || !layoutConfig) return;
+  
+  setBookingInProgress(true);
+  
+  try {
+    // Check if specific seat is still available
+    const { data: existingBooking, error: checkError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('ride_id', ride.id)
+      .eq('seat_id', selectedSeat) // ✅ Check specific seat
+      .eq('status', 'confirmed')
+      .maybeSingle();
 
-      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" error
-        throw checkError;
-      }
-
-      if (existingBooking) {
-        throw new Error('Seat has been booked by another passenger');
-      }
-
-      // Calculate price based on seat type
-      const seat = layoutConfig.rows
-        .flatMap(row => row.seats)
-        .find(s => s.id === selectedSeat);
-      
-      if (!seat) throw new Error('Seat not found');
-
-      // Calculate dynamic price based on seat type
-      const basePrice = ride.base_price || ride.price_per_seat;
-      let seatPrice = basePrice;
-      if (seat.type === 'front') seatPrice += 100;
-      else if (seat.type === 'window') seatPrice += 50;
-
-      // Create booking with proper field mapping
-      const { data: booking, error: bookingError } = await supabase
-        .from('bookings')
-        .insert({
-          ride_id: ride.id,
-          passenger_id: userId,
-          seat_id: selectedSeat,
-          seats_booked: 1,
-          total_price: seatPrice,
-          status: 'confirmed',
-          selected_seats: [selectedSeat] // Also store in selected_seats array
-        })
-        .select()
-        .single();
-
-      if (bookingError) throw bookingError;
-
-      // Update available seats in ride
-      const { error: updateError } = await supabase
-        .from('rides')
-        .update({ 
-          available_seats: ride.available_seats - 1,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', ride.id);
-
-      if (updateError) throw updateError;
-
-      // Refresh bookings to show the new booking
-      await fetchBookings();
-
-      toast({
-        title: 'Booking Confirmed!',
-        description: `Seat ${selectedSeat} booked successfully for ₹${seatPrice}`,
-      });
-
-      // Reset selection
-      setSelectedSeat(null);
-
-      onBookingComplete?.(booking);
-      
-    } catch (error: any) {
-      console.error('Booking error:', error);
-      toast({
-        title: 'Booking Failed',
-        description: error.message || 'Failed to book seat. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setBookingInProgress(false);
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
     }
-  };
+
+    if (existingBooking) {
+      throw new Error('Seat has been booked by another passenger');
+    }
+
+    const seat = layoutConfig.rows
+      .flatMap(row => row.seats)
+      .find(s => s.id === selectedSeat);
+    
+    if (!seat) throw new Error('Seat not found');
+
+    const basePrice = ride.base_price || ride.price_per_seat;
+    let seatPrice = basePrice;
+    if (seat.type === 'front') seatPrice += 100;
+    else if (seat.type === 'window') seatPrice += 50;
+
+    // ✅ FIXED: Create booking with proper seat_id field
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .insert({
+        ride_id: ride.id,
+        passenger_id: userId,
+        seat_id: selectedSeat, // ✅ Add seat_id
+        seats_booked: 1,
+        total_price: seatPrice,
+        status: 'confirmed',
+        selected_seats: [selectedSeat], // ✅ Also store in array
+        booking_date: new Date().toISOString().split('T')[0], // ✅ Add booking_date
+      })
+      .select()
+      .single();
+
+    if (bookingError) throw bookingError;
+
+    // Update available seats
+    const { error: updateError } = await supabase
+      .from('rides')
+      .update({ 
+        available_seats: ride.available_seats - 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', ride.id);
+
+    if (updateError) throw updateError;
+
+    await fetchBookings(); // Refresh bookings
+
+    toast({
+      title: 'Booking Confirmed!',
+      description: `Seat ${selectedSeat} booked successfully for ₹${seatPrice}`,
+    });
+
+    setSelectedSeat(null);
+    onBookingComplete?.(booking);
+    
+  } catch (error: any) {
+    console.error('Booking error:', error);
+    toast({
+      title: 'Booking Failed',
+      description: error.message || 'Failed to book seat. Please try again.',
+      variant: 'destructive',
+    });
+  } finally {
+    setBookingInProgress(false);
+  }
+};
 
   if (!layoutConfig) {
     return (

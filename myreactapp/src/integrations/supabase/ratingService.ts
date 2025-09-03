@@ -18,6 +18,7 @@ export interface DriverRatingSummary {
 }
 
 // ➤ Submit or update a rating for a driver
+// Update submitDriverRating function in ratingService.ts
 export const submitDriverRating = async (
   driverId: string,
   bookingId: string,
@@ -28,10 +29,11 @@ export const submitDriverRating = async (
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, message: 'User not authenticated' };
 
+    // ✅ FIXED: Check for existing rating using booking_id
     const { data: existingRating } = await supabase
       .from('driver_ratings')
       .select('id')
-      .eq('booking_id', bookingId)
+      .eq('booking_id', bookingId) // ✅ Use booking_id instead of ride_id
       .eq('passenger_id', user.id)
       .maybeSingle();
 
@@ -53,7 +55,7 @@ export const submitDriverRating = async (
         .insert({
           driver_id: driverId,
           passenger_id: user.id,
-          booking_id: bookingId,
+          booking_id: bookingId, // ✅ Use booking_id
           rating: stars,
           feedback: feedback || null
         })
