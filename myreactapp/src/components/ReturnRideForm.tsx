@@ -82,22 +82,29 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
     
     try {
       // Updated: Use correct database field names and remove departure_timestamp
+      // ✅ FIXED: Add departure_timestamp
+        const departureTimestamp = new Date(
+          `${format(data.returnDate!, 'yyyy-MM-dd')}T${data.returnTime!}`
+        ).toISOString();
       const returnRideData = {
-        driver_id: user.id,
-        vehicle_id: originalRide.vehicleId,
-        from_city: originalRide.toCity, // Swap cities for return
-        to_city: originalRide.fromCity,
-        departure_date: format(data.returnDate!, 'yyyy-MM-dd'),
-        departure_time: data.returnTime!,
-        pickup_point: data.returnPickupPoint!,
-        available_seats: data.returnAvailableSeats!,
-        total_seats: data.returnAvailableSeats!, // Set total_seats
-        price_per_seat: data.returnPricePerSeat!,
-        base_price: data.returnPricePerSeat!, // Set base_price for dynamic pricing
-        notes: data.returnNotes || null,
-        status: 'active',
-        vehicle_type: null,
-      };
+      driver_id: user.id,
+      vehicle_id: originalRide.vehicleId,
+      from_city: originalRide.toCity,
+      to_city: originalRide.fromCity,
+      departure_date: format(data.returnDate!, 'yyyy-MM-dd'),
+      departure_time: data.returnTime!,
+      departure_timestamp: departureTimestamp, // ✅ ADD THIS
+      pickup_point: data.returnPickupPoint!,
+      available_seats: data.returnAvailableSeats!,
+      total_seats: data.returnAvailableSeats!,
+      price_per_seat: data.returnPricePerSeat!,
+      base_price: data.returnPricePerSeat!,
+      notes: data.returnNotes || null,
+      status: 'active',
+      vehicle_type: null,
+      created_at: new Date().toISOString(), // ✅ ADD THIS if required
+      updated_at: new Date().toISOString(),  // ✅ ADD THIS if required
+    };
 
       console.log('Inserting return ride with data:', returnRideData);
 
