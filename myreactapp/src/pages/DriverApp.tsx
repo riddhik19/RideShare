@@ -149,18 +149,19 @@ export const DriverApp = () => {
   try {
     console.log('🚗 Fetching rides for driver:', profile.id);
     
+    // Fix: Use explicit foreign key relationship name instead of just 'vehicles'
     const { data, error } = await supabase
       .from('rides')
       .select(`
         *,
-        vehicles (
+        vehicles!rides_vehicle_id_fkey (
           car_model,
           car_type,
           color
         )
       `)
       .eq('driver_id', profile.id)
-      .eq('status', 'active') // ✅ FIXED: Correct field name
+      .eq('status', 'active')
       .order('departure_date', { ascending: true });
 
     console.log('🚗 Rides query result:', { data, error });
@@ -189,96 +190,94 @@ export const DriverApp = () => {
     setLoading(false);
   }
 };
+
   // Fix 2: fetchUpcomingRides - Simplified approach with status field
   const fetchUpcomingRides = async () => {
-    if (!profile?.id) return;
-    try {
-      console.log('📅 Fetching upcoming rides...');
-      
-      const now = new Date();
-      const todayString = now.toISOString().split('T')[0];
-      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const oneWeekString = oneWeekFromNow.toISOString().split('T')[0];
-      
-      // Step 1: Get rides in date range with active status
-      const { data: ridesData, error: ridesError } = await supabase
-        .from('rides')
-        .select('*')
-        .eq('driver_id', profile.id)
-        .eq('status', 'active') // ✅ FIXED: Use status field
-        .gte('departure_date', todayString)
-        .lte('departure_date', oneWeekString)
-        .order('departure_date', { ascending: true });
+  if (!profile?.id) return;
+  try {
+    console.log('📅 Fetching upcoming rides...');
+    
+    const now = new Date();
+    const todayString = now.toISOString().split('T')[0];
+    const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const oneWeekString = oneWeekFromNow.toISOString().split('T')[0];
+    
+    // Step 1: Get rides in date range with active status - Fix vehicle relationship
+    const { data: ridesData, error: ridesError } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        vehicles!rides_vehicle_id_fkey (
+          car_model,
+          car_type,
+          color
+        )
+      `)
+      .eq('driver_id', profile.id)
+      .eq('status', 'active')
+      .gte('departure_date', todayString)
+      .lte('departure_date', oneWeekString)
+      .order('departure_date', { ascending: true });
 
-      if (ridesError) throw ridesError;
-      console.log('📅 Found rides:', ridesData?.length);
+    if (ridesError) throw ridesError;
+    console.log('📅 Found rides:', ridesData?.length);
 
-      if (!ridesData || ridesData.length === 0) {
-        setUpcomingRides([]);
-        setStats(prev => ({ ...prev, upcomingRides: 0 }));
-        return;
-      }
-
-      // Step 2: Get bookings for these rides
-      const rideIds = ridesData.map(ride => ride.id);
-      const { data: bookingsData, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('*')
-        .in('ride_id', rideIds)
-        .eq('status', 'confirmed');
-
-      if (bookingsError) throw bookingsError;
-      console.log('📅 Found bookings:', bookingsData?.length);
-
-      // Step 3: Get passenger details for bookings
-      const passengerIds = [...new Set(bookingsData?.map(b => b.passenger_id) || [])];
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, full_name, phone')
-        .in('id', passengerIds);
-
-      // Step 4: Get vehicle details
-      const vehicleIds = [...new Set(ridesData.map(r => r.vehicle_id))];
-      const { data: vehiclesData } = await supabase
-        .from('vehicles')
-        .select('id, car_model, car_type, color')
-        .in('id', vehicleIds);
-
-      // Step 5: Combine all data
-      const ridesWithDetails = ridesData.map(ride => {
-        const rideBookings = (bookingsData || [])
-          .filter(booking => booking.ride_id === ride.id)
-          .map(booking => {
-            const passengerProfile = profilesData?.find(p => p.id === booking.passenger_id);
-            return {
-              ...booking,
-              profiles: passengerProfile || null
-            };
-          });
-
-        const vehicle = vehiclesData?.find(v => v.id === ride.vehicle_id);
-
-        return {
-          ...ride,
-          bookings: rideBookings,
-          vehicles: vehicle || null
-        };
-      });
-
-      // Only include rides that have confirmed bookings
-      const ridesWithBookings = ridesWithDetails.filter(ride => 
-        ride.bookings && ride.bookings.length > 0
-      );
-
-      console.log('✅ Upcoming rides with bookings:', ridesWithBookings.length);
-      setUpcomingRides(ridesWithBookings);
-      setStats(prev => ({ ...prev, upcomingRides: ridesWithBookings.length }));
-      
-    } catch (error) {
-      console.error('❌ Error fetching upcoming rides:', error);
+    if (!ridesData || ridesData.length === 0) {
+      setUpcomingRides([]);
       setStats(prev => ({ ...prev, upcomingRides: 0 }));
+      return;
     }
-  };
+
+    // Step 2: Get bookings for these rides
+    const rideIds = ridesData.map(ride => ride.id);
+    const { data: bookingsData, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('*')
+      .in('ride_id', rideIds)
+      .eq('status', 'confirmed');
+
+    if (bookingsError) throw bookingsError;
+    console.log('📅 Found bookings:', bookingsData?.length);
+
+    // Step 3: Get passenger details for bookings
+    const passengerIds = [...new Set(bookingsData?.map(b => b.passenger_id) || [])];
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone')
+      .in('id', passengerIds);
+
+    // Step 4: Combine all data
+    const ridesWithDetails = ridesData.map(ride => {
+      const rideBookings = (bookingsData || [])
+        .filter(booking => booking.ride_id === ride.id)
+        .map(booking => {
+          const passengerProfile = profilesData?.find(p => p.id === booking.passenger_id);
+          return {
+            ...booking,
+            profiles: passengerProfile || null
+          };
+        });
+
+      return {
+        ...ride,
+        bookings: rideBookings
+      };
+    });
+
+    // Only include rides that have confirmed bookings
+    const ridesWithBookings = ridesWithDetails.filter(ride => 
+      ride.bookings && ride.bookings.length > 0
+    );
+
+    console.log('✅ Upcoming rides with bookings:', ridesWithBookings.length);
+    setUpcomingRides(ridesWithBookings);
+    setStats(prev => ({ ...prev, upcomingRides: ridesWithBookings.length }));
+    
+  } catch (error) {
+    console.error('❌ Error fetching upcoming rides:', error);
+    setStats(prev => ({ ...prev, upcomingRides: 0 }));
+  }
+};
 
   // Fix 3: fetchAllBookings - Completely rewritten
   const fetchAllBookings = async () => {

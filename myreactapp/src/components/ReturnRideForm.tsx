@@ -72,90 +72,93 @@ export const ReturnRideForm: React.FC<ReturnRideFormProps> = ({
 
   const watchEnableReturn = form.watch('enableReturnRide');
 
-  const onSubmit = async (data: ReturnRideFormData) => {
-    if (!user || !data.enableReturnRide) {
-      onSuccess();
-      return;
-    }
-    
-    setLoading(true);
-    
-    try {
-      // Updated: Use correct database field names and remove departure_timestamp
-      // ✅ FIXED: Add departure_timestamp
-        const departureTimestamp = new Date(
-          `${format(data.returnDate!, 'yyyy-MM-dd')}T${data.returnTime!}`
-        ).toISOString();
-      const returnRideData = {
+  // Fixed onSubmit function in ReturnRideForm.tsx
+// Replace the existing onSubmit function with this corrected version
+
+const onSubmit = async (data: ReturnRideFormData) => {
+  if (!user || !data.enableReturnRide) {
+    onSuccess();
+    return;
+  }
+  
+  setLoading(true);
+  
+  try {
+    // Fixed: Add departure_timestamp and ensure all required fields
+    const departureTimestamp = new Date(
+      `${format(data.returnDate!, 'yyyy-MM-dd')}T${data.returnTime!}`
+    ).toISOString();
+
+    const returnRideData = {
       driver_id: user.id,
       vehicle_id: originalRide.vehicleId,
       from_city: originalRide.toCity,
       to_city: originalRide.fromCity,
       departure_date: format(data.returnDate!, 'yyyy-MM-dd'),
       departure_time: data.returnTime!,
-      departure_timestamp: departureTimestamp, // ✅ ADD THIS
+      departure_timestamp: departureTimestamp, // Required field
       pickup_point: data.returnPickupPoint!,
       available_seats: data.returnAvailableSeats!,
-      total_seats: data.returnAvailableSeats!,
+      total_seats: data.returnAvailableSeats!, // Set total_seats
       price_per_seat: data.returnPricePerSeat!,
-      base_price: data.returnPricePerSeat!,
+      base_price: data.returnPricePerSeat!, // Set base_price
       notes: data.returnNotes || null,
-      status: 'active',
+      status: 'active', // Use correct status field
       vehicle_type: null,
-      created_at: new Date().toISOString(), // ✅ ADD THIS if required
-      updated_at: new Date().toISOString(),  // ✅ ADD THIS if required
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
 
-      console.log('Inserting return ride with data:', returnRideData);
+    console.log('Inserting return ride with data:', returnRideData);
 
-      const { data: insertedRide, error } = await supabase
-        .from('rides')
-        .insert(returnRideData)
-        .select()
-        .single();
+    const { data: insertedRide, error } = await supabase
+      .from('rides')
+      .insert(returnRideData)
+      .select()
+      .single();
 
-      if (error) {
-        console.error('Supabase error details:', error);
-        throw error;
-      }
-
-      console.log('Return ride created successfully:', insertedRide);
-
-      toast({
-        title: 'Success',
-        description: 'Return ride posted successfully!',
-      });
-      
-      onSuccess(insertedRide);
-    } catch (error: unknown) {
-      console.error('Error posting return ride:', error);
-      
-      let errorMessage = 'Please try again.';
-      
-      if (error && typeof error === 'object' && 'message' in error) {
-        const errorMsg = (error as { message: string }).message;
-        if (errorMsg.includes('duplicate key')) {
-          errorMessage = 'A return ride with these details already exists.';
-        } else if (errorMsg.includes('foreign key')) {
-          errorMessage = 'Please ensure vehicle is valid.';
-        } else if (errorMsg.includes('check constraint')) {
-          errorMessage = 'Please check your input values.';
-        } else if (errorMsg.includes('not-null constraint')) {
-          errorMessage = 'Missing required fields.';
-        } else {
-          errorMessage = errorMsg;
-        }
-      }
-      
-      toast({
-        title: 'Error',
-        description: `Failed to post return ride: ${errorMessage}`,
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
+    if (error) {
+      console.error('Supabase error details:', error);
+      throw error;
     }
-  };
+
+    console.log('Return ride created successfully:', insertedRide);
+
+    toast({
+      title: 'Success',
+      description: 'Return ride posted successfully!',
+    });
+    
+    onSuccess(insertedRide);
+  } catch (error: unknown) {
+    console.error('Error posting return ride:', error);
+    
+    let errorMessage = 'Please try again.';
+    
+    if (error && typeof error === 'object' && 'message' in error) {
+      const errorMsg = (error as { message: string }).message;
+      if (errorMsg.includes('duplicate key')) {
+        errorMessage = 'A return ride with these details already exists.';
+      } else if (errorMsg.includes('foreign key')) {
+        errorMessage = 'Please ensure vehicle is valid.';
+      } else if (errorMsg.includes('check constraint')) {
+        errorMessage = 'Please check your input values.';
+      } else if (errorMsg.includes('not-null constraint')) {
+        errorMessage = 'Missing required fields.';
+      } else {
+        errorMessage = errorMsg;
+      }
+    }
+    
+    toast({
+      title: 'Error',
+      description: `Failed to post return ride: ${errorMessage}`,
+      variant: 'destructive',
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <Card className="border-dashed border-2 border-muted-foreground/25">

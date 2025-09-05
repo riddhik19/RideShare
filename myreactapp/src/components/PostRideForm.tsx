@@ -120,25 +120,25 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
   ).toISOString();
   
   const rideData = {
-  driver_id: user.id,
-  vehicle_id: data.vehicleId,
-  from_city: data.fromCity,
-  to_city: data.toCity,
-  departure_date: format(data.departureDate, 'yyyy-MM-dd'),
-  departure_time: data.departureTime,
-  departure_timestamp: departureTimestamp,   // ✅ FIXED
-  pickup_point: data.pickupPoint,
-  available_seats: data.availableSeats,
-  total_seats: data.availableSeats,
-  base_price: data.basePrice,
-  price_per_seat: data.basePrice,
-  notes: data.notes || null,
-  status: 'active',
-  vehicle_type: null,
-  created_at: new Date().toISOString(),
-};
+    driver_id: user.id,
+    vehicle_id: data.vehicleId,
+    from_city: data.fromCity,
+    to_city: data.toCity,
+    departure_date: format(data.departureDate, 'yyyy-MM-dd'),
+    departure_time: data.departureTime,
+    departure_timestamp: departureTimestamp, // Required field
+    pickup_point: data.pickupPoint,
+    available_seats: data.availableSeats,
+    total_seats: data.availableSeats, // Set total_seats field
+    base_price: data.basePrice, // Set base_price field
+    price_per_seat: data.basePrice,
+    notes: data.notes || null,
+    status: 'active', // Use correct status field
+    vehicle_type: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
-  
   try {
     console.log('Attempting to insert ride data:', rideData);
     let result;
@@ -187,6 +187,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     setLoading(false);
   }
 };
+
   const handleReturnRideComplete = (returnRideData?: any) => {
     if (returnRideData) {
       toast({

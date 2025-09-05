@@ -57,6 +57,7 @@ const searchRides = async () => {
   setSearching(true);
   
   try {
+    // Fix: Use explicit foreign key relationship name
     const { data: rides, error } = await supabase
       .from('rides')
       .select(`
@@ -65,7 +66,7 @@ const searchRides = async () => {
           full_name,
           average_rating
         ),
-        vehicles:vehicle_id (
+        vehicles!rides_vehicle_id_fkey (
           car_model,
           car_type
         )
@@ -73,7 +74,7 @@ const searchRides = async () => {
       .ilike('from_city', `%${fromLocation}%`)
       .ilike('to_city', `%${toLocation}%`)
       .eq('departure_date', searchDate)
-      .eq('status', 'active') // ✅ FIXED: Use status field
+      .eq('status', 'active') // Use correct status field
       .gt('available_seats', 0)
       .order('departure_time', { ascending: true });
 
@@ -116,6 +117,7 @@ const searchRides = async () => {
     setSearching(false);
   }
 };
+
 
   const handleBookingComplete = (bookingData: any) => {
     toast({
