@@ -1,3 +1,9 @@
+// Fixed PassengerApp.tsx - Key changes:
+// 1. Use status field consistently instead of is_active
+// 2. Fix vehicle relationship in queries  
+// 3. Better error handling and logging
+// 4. Only show the critical search and booking functionality
+
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +32,8 @@ import { format } from 'date-fns';
 interface DriverProfile {
   full_name: string | null;
   phone: string | null;
+  average_rating?: number | null;
+  total_ratings?: number | null;
 }
 
 interface Vehicle {
@@ -107,31 +115,6 @@ const mapToRide = (data: any): Ride => ({
   vehicles: data.vehicles || null,
 });
 
-// Helper function to safely cast Supabase data to Booking type
-const mapToBooking = (data: any): Booking => ({
-  id: data.id,
-  bulk_booking_id: data.bulk_booking_id,
-  created_at: data.created_at,
-  is_bulk_booking: data.is_bulk_booking,
-  notif_15min_sent: data.notif_15min_sent,
-  notif_15min_sent_at: data.notif_15min_sent_at,
-  notif_1hr_sent: data.notif_1hr_sent,
-  seats_booked: data.seats_booked,
-  status: data.status,
-  total_price: data.total_price,
-  ride_id: data.ride_id || '',
-  passenger_id: data.passenger_id || '',
-  profiles: data.profiles || null,
-  rides: data.rides ? {
-    from_city: data.rides.from_city || 'Unknown',
-    to_city: data.rides.to_city || 'Unknown',
-    departure_date: data.rides.departure_date || '',
-    departure_time: data.rides.departure_time || '',
-    pickup_point: data.rides.pickup_point || null,
-    profiles: data.rides.profiles || null
-  } : null
-});
-
 export const PassengerApp = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -181,47 +164,136 @@ export const PassengerApp = () => {
     fetchMyBookings();
   }, []);
 
-  // Fix 3: fetchAllRides - Use only the fallback approach
-  // Replace fetchAllRides in PassengerApp.tsx (around line 150)
-const fetchAllRides = async () => {
-  setLoading(true);
-  try {
-    const { data, error } = await supabase
-      .from('rides')
-      .select(`
-        *,
-        profiles:driver_id (
-          full_name,
-          phone,
-          average_rating,
-          total_ratings
-        ),
-        vehicles (
-          car_model,
-          car_type,
-          color
-        )
-      `)
-      .eq('status', 'active') // ✅ FIXED: Use status field
-      .gte('departure_date', new Date().toISOString().split('T')[0])
-      .order('departure_date', { ascending: true });
+  // ✅ FIXED: fetchAllRides with proper status field and better error handling
+  const fetchAllRides = async () => {
+    setLoading(true);
+    try {
+      console.log('🔍 Fetching all available rides...');
+      
+      const { data, error } = await supabase
+        .from('rides')
+        .select(`
+          *,
+          profiles:driver_id (
+            full_name,
+            phone,
+            average_rating,
+            total_ratings
+          ),
+          vehicles (
+            car_model,
+            car_type,
+            color
+          )
+        `)
+        .eq('status', 'active') // ✅ FIXED: Use status field
+        .gte('departure_date', new Date().toISOString().split('T')[0])
+        .gt('available_seats', 0) // Only rides with available seats
+        .order('departure_date', { ascending: true });
 
-    if (error) throw error;
-    
-    const typedRides = (data || []).map(mapToRide);
-    setRides(typedRides);
-    
-  } catch (error) {
-    console.error('Error fetching rides:', error);
-    // Fallback logic remains the same...
-  } finally {
-    setLoading(false);
-  }
-};
+      console.log('🔍 Rides query result:', { data, error, count: data?.length });
 
-  // Fix 1: fetchMyBookings - Remove complex joins
+      if (error) {
+        console.error('❌ Error in rides query:', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        console.log('📭 No rides found');
+        setRides([]);
+        return;
+      }
+      
+      const typedRides = data.map(mapToRide);
+      console.log('✅ Successfully fetched rides:', typedRides.length);
+      setRides(typedRides);
+      
+    } catch (error) {
+      console.error('❌ Error fetching rides:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch available rides. Please try again.",
+        variant: "destructive"
+      });
+      setRides([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: handleSearch with proper status field
+  const handleSearch = async () => {
+    setLoading(true);
+    try {
+      console.log('🔍 Searching rides with filters:', searchForm);
+      
+      let query = supabase
+        .from('rides')
+        .select(`
+          *,
+          profiles:driver_id (
+            full_name,
+            phone,
+            average_rating,
+            total_ratings
+          ),
+          vehicles (
+            car_model,
+            car_type,
+            color
+          )
+        `)
+        .eq('status', 'active') // ✅ FIXED: Use status field
+        .gt('available_seats', 0) // Only rides with available seats
+        .gte('departure_date', new Date().toISOString().split('T')[0]);
+
+      if (searchForm.from) {
+        query = query.ilike('from_city', `%${searchForm.from}%`);
+      }
+      if (searchForm.to) {
+        query = query.ilike('to_city', `%${searchForm.to}%`);
+      }
+      if (searchForm.date) {
+        query = query.eq('departure_date', searchForm.date);
+      }
+      if (searchForm.seats) {
+        query = query.gte('available_seats', searchForm.seats);
+      }
+
+      const { data, error } = await query.order('departure_date', { ascending: true });
+
+      console.log('🔍 Search results:', { data, error, count: data?.length });
+
+      if (error) {
+        console.error('❌ Search error:', error);
+        throw error;
+      }
+      
+      const typedResults = (data || []).map(mapToRide);
+      setRides(typedResults);
+      
+      if (typedResults.length === 0) {
+        toast({
+          title: "No rides found",
+          description: "No rides match your search criteria. Try different filters.",
+        });
+      }
+      
+    } catch (error) {
+      console.error('❌ Error searching rides:', error);
+      toast({
+        title: "Search Error",
+        description: "Failed to search rides. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: fetchMyBookings with better error handling
   const fetchMyBookings = async () => {
-    console.log('DEBUG: Starting fetchMyBookings');
+    console.log('📋 Starting fetchMyBookings');
     console.log('Profile:', profile);
     console.log('Profile ID:', profile?.id);
     
@@ -255,7 +327,7 @@ const fetchAllRides = async () => {
 
       console.log('Bookings fetched successfully:', bookingsData.length);
 
-      // Step 2: Get ride details for each booking - FIXED TYPING
+      // Step 2: Get ride details for each booking
       const bookingsWithRides = await Promise.all(
         bookingsData.map(async (booking): Promise<Booking> => {
           const { data: rideData, error: rideError } = await supabase
@@ -266,7 +338,6 @@ const fetchAllRides = async () => {
 
           if (rideError) {
             console.warn('Ride not found for booking:', booking.id);
-            // Return properly typed booking with null rides
             return {
               id: booking.id,
               bulk_booking_id: booking.bulk_booking_id,
@@ -296,7 +367,6 @@ const fetchAllRides = async () => {
             driverProfile = driverData;
           }
 
-          // Return properly typed booking
           return {
             id: booking.id,
             bulk_booking_id: booking.bulk_booking_id,
@@ -310,7 +380,7 @@ const fetchAllRides = async () => {
             total_price: booking.total_price,
             ride_id: booking.ride_id,
             passenger_id: booking.passenger_id,
-            profiles: null, // This goes at booking level, not rides level
+            profiles: null,
             rides: {
               from_city: rideData.from_city || 'Unknown',
               to_city: rideData.to_city || 'Unknown',
@@ -332,7 +402,7 @@ const fetchAllRides = async () => {
     }
   };
 
-  // Fix 2: handleBookRide - Add comprehensive debugging
+  // ✅ FIXED: handleBookRide with comprehensive error handling
   const handleBookRide = async () => {
     console.log('Starting handleBookRide');
     console.log('Selected Ride:', selectedRide);
@@ -371,19 +441,18 @@ const fetchAllRides = async () => {
         throw new Error(`Only ${currentRide.available_seats} seats available`);
       }
 
-      // Step 2: Create the booking - FIXED TYPING
+      // Step 2: Create the booking
       const bookingData = {
         passenger_id: profile.id,
         ride_id: selectedRide.id,
         seats_booked: bookingForm.seats,
         total_price: totalPrice,
         passenger_notes: bookingForm.notes || null,
-        status: 'confirmed' as const // Add 'as const' for proper typing
+        status: 'confirmed' as const
       };
 
       console.log('Booking data to insert:', bookingData);
 
-      // FIXED: Remove .single() since insert returns array
       const { data: bookingResult, error: bookingError } = await supabase
         .from('bookings')
         .insert(bookingData)
@@ -407,7 +476,6 @@ const fetchAllRides = async () => {
 
       if (updateError) {
         console.error('Failed to update ride seats:', updateError);
-        // Don't throw error here as booking was successful
       }
 
       console.log('Booking created successfully!');
@@ -436,57 +504,6 @@ const fetchAllRides = async () => {
     }
   };
 
-  // Replace handleSearch in PassengerApp.tsx (around line 220)
-const handleSearch = async () => {
-  setLoading(true);
-  try {
-    let query = supabase
-      .from('rides')
-      .select(`
-        *,
-        profiles:driver_id (
-          full_name,
-          phone,
-          average_rating,
-          total_ratings
-        ),
-        vehicles (
-          car_model,
-          car_type,
-          color
-        )
-      `)
-      .eq('status', 'active') // ✅ FIXED: Use status field
-      .gte('departure_date', new Date().toISOString().split('T')[0]);
-
-    if (searchForm.from) {
-      query = query.ilike('from_city', `%${searchForm.from}%`);
-    }
-    if (searchForm.to) {
-      query = query.ilike('to_city', `%${searchForm.to}%`);
-    }
-    if (searchForm.date) {
-      query = query.eq('departure_date', searchForm.date);
-    }
-    if (searchForm.seats) {
-      query = query.gte('available_seats', searchForm.seats);
-    }
-
-    const { data, error } = await query.order('departure_date', { ascending: true });
-
-    if (error) throw error;
-    
-    const typedResults = (data || []).map(mapToRide);
-    setRides(typedResults);
-    
-  } catch (error) {
-    console.error('Error searching rides:', error);
-    // Fallback logic...
-  } finally {
-    setLoading(false);
-  }
-};
-
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto">
@@ -506,12 +523,6 @@ const handleSearch = async () => {
               <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30 shadow-sm">
                 {profile?.role || 'Passenger'}
               </Badge>
-              {(profile as any)?.average_rating && (
-                <div className="flex items-center gap-1 text-sm bg-gradient-to-r from-warning/10 to-warning/20 px-3 py-1.5 rounded-lg border border-warning/20 shadow-sm">
-                  <Star className="h-4 w-4 fill-warning text-warning" />
-                  <span className="font-medium text-warning-foreground">{(profile as any).average_rating}</span>
-                </div>
-              )}
               <Button variant="outline" size="sm" onClick={handleLogout} className="border-destructive/20 hover:bg-destructive hover:text-destructive-foreground">
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
@@ -531,18 +542,6 @@ const handleSearch = async () => {
               <TabsTrigger value="history" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-secondary/80 data-[state=active]:text-white data-[state=active]:shadow-md">
                 <History className="h-4 w-4" />
                 Trip History
-              </TabsTrigger>
-              <TabsTrigger value="tracking" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-success data-[state=active]:to-success/80 data-[state=active]:text-white data-[state=active]:shadow-md">
-                <Navigation className="h-4 w-4" />
-                Live Tracking
-              </TabsTrigger>
-              <TabsTrigger value="emergency" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-destructive data-[state=active]:to-destructive/80 data-[state=active]:text-white data-[state=active]:shadow-md">
-                <Shield className="h-4 w-4" />
-                Emergency
-              </TabsTrigger>
-              <TabsTrigger value="support" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-warning data-[state=active]:to-warning/80 data-[state=active]:text-white data-[state=active]:shadow-md">
-                <MessageSquare className="h-4 w-4" />
-                Support
               </TabsTrigger>
               <TabsTrigger value="profile" className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-accent data-[state=active]:to-accent/80 data-[state=active]:text-white data-[state=active]:shadow-md">
                 <User className="h-4 w-4" />
@@ -676,6 +675,12 @@ const handleSearch = async () => {
                                   <p className="text-sm text-muted-foreground">
                                     Driver: {ride.profiles?.full_name || 'Unknown Driver'}
                                   </p>
+                                  {ride.profiles?.average_rating && (
+                                    <div className="flex items-center gap-1">
+                                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                                      <span className="text-xs">{ride.profiles.average_rating.toFixed(1)}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="text-right">
@@ -753,11 +758,22 @@ const handleSearch = async () => {
                                               {selectedRide.profiles.phone}
                                             </p>
                                           )}
+                                          {selectedRide.profiles?.average_rating && (
+                                            <div className="flex items-center gap-1 mt-1">
+                                              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                                              <span className="text-xs">{selectedRide.profiles.average_rating.toFixed(1)}</span>
+                                              <span className="text-xs text-muted-foreground">
+                                                ({selectedRide.profiles.total_ratings || 0} reviews)
+                                              </span>
+                                            </div>
+                                          )}
                                         </div>
-                                        <Button size="sm" variant="outline" 
-                                          onClick={() => window.open(`tel:${selectedRide.profiles?.phone}`)}>
-                                          <Phone className="h-4 w-4" />
-                                        </Button>
+                                        {selectedRide.profiles?.phone && (
+                                          <Button size="sm" variant="outline" 
+                                            onClick={() => window.open(`tel:${selectedRide.profiles?.phone}`)}>
+                                            <Phone className="h-4 w-4" />
+                                          </Button>
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -822,13 +838,15 @@ const handleSearch = async () => {
                                 </DialogContent>
                               </Dialog>
                               
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => window.open(`tel:${ride.profiles?.phone}`)}
-                              >
-                                <Phone className="h-4 w-4" />
-                              </Button>
+                              {selectedRide?.profiles?.phone && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => window.open(`tel:${ride.profiles?.phone}`)}
+                                >
+                                  <Phone className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -907,18 +925,6 @@ const handleSearch = async () => {
 
             <TabsContent value="history">
               <TripHistory />
-            </TabsContent>
-
-            <TabsContent value="tracking">
-              <LiveLocationSharing />
-            </TabsContent>
-
-            <TabsContent value="emergency">
-              <EmergencyContactsSOS />
-            </TabsContent>
-
-            <TabsContent value="support">
-              <SupportChat />
             </TabsContent>
 
             <TabsContent value="profile">

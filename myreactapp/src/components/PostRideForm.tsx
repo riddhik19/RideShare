@@ -133,14 +133,14 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     base_price: data.basePrice, // Set base_price field
     price_per_seat: data.basePrice,
     notes: data.notes || null,
-    status: 'active', // Use correct status field
+    status: 'active', // ✅ CRITICAL: Use status field instead of is_active
     vehicle_type: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
   try {
-    console.log('Attempting to insert ride data:', rideData);
+    console.log('🚗 Attempting to insert ride data:', rideData);
     let result;
     
     if (editData) {
@@ -159,7 +159,14 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
         .select();
     }
     
-    if (result.error) throw result.error;
+    console.log('🚗 Ride operation result:', result);
+    
+    if (result.error) {
+      console.error('❌ Database error:', result.error);
+      throw result.error;
+    }
+    
+    console.log('✅ Ride posted successfully:', result.data);
     
     toast({
       title: 'Success',
@@ -174,7 +181,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       onSuccess();
     }
   } catch (error: any) {
-    console.error('Error posting ride:', error);
+    console.error('❌ Error posting ride:', error);
     
     toast({
       title: 'Error',
