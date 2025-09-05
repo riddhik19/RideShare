@@ -160,29 +160,63 @@ const RedBusStyleSeatLayout: React.FC<SeatLayoutProps> = ({
   };
 
   const handleSeatClick = (seat: Seat) => {
-    if (seat.type === 'driver' || seat.isBooked) return;
+  if (seat.type === 'driver' || seat.isBooked) return;
 
-    const isCurrentlySelected = selectedSeats.includes(seat.id);
+  const isCurrentlySelected = selectedSeats.includes(seat.id);
+  
+  if (isCurrentlySelected) {
+    setSelectedSeats(prev => prev.filter(id => id !== seat.id));
+    setSeats(prev => prev.map(s => 
+      s.id === seat.id ? { ...s, isSelected: false } : s
+    ));
+  } else {
+    // ✅ FIXED: Single seat selection for ride-sharing
+    setSelectedSeats([seat.id]);
+    setSeats(prev => prev.map(s => ({
+      ...s,
+      isSelected: s.id === seat.id
+    })));
     
-    if (isCurrentlySelected) {
-      setSelectedSeats(prev => prev.filter(id => id !== seat.id));
-      setSeats(prev => prev.map(s => 
-        s.id === seat.id ? { ...s, isSelected: false } : s
-      ));
-    } else {
-      setSelectedSeats([seat.id]);
-      setSeats(prev => prev.map(s => ({
-        ...s,
-        isSelected: s.id === seat.id
-      })));
-      
-      onSeatSelect(seat.id, seat.price);
-      toast({
-        title: 'Seat Selected',
-        description: `Seat ${seat.id} selected for ₹${seat.price}`,
-      });
-    }
-  };
+    // ✅ FIXED: Dynamic pricing callback
+    onSeatSelect(seat.id, seat.price);
+    
+    toast({
+      title: 'Seat Selected',
+      description: `Seat ${seat.id} selected for ₹${seat.price}`,
+    });
+  }
+};
+
+const renderSeat = (seat: Seat) => {
+  return (
+    <div
+      key={seat.id}
+      className="relative group"
+      onMouseEnter={() => setHoveredSeat(seat.id)}
+      onMouseLeave={() => setHoveredSeat(null)}
+    >
+      <div
+        className={getSeatStyle(seat)}
+        onClick={() => handleSeatClick(seat)}
+      >
+        {renderSeatIcon(seat)}
+        
+        <div className="absolute -bottom-5 left-1/2 transform -translate-x-1/2 text-xs text-gray-600">
+          {seat.id}
+        </div>
+        
+        {/* ✅ FIXED: Hover pricing display */}
+        {hoveredSeat === seat.id && seat.type !== 'driver' && !seat.isBooked && (
+          <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-black text-white px-2 py-1 rounded text-xs font-bold z-10 whitespace-nowrap">
+            ₹{seat.price}
+            {seat.type === 'front' && <div className="text-xs">Premium +₹100</div>}
+            {seat.type === 'window' && <div className="text-xs">Window +₹50</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
   const getSeatStyle = (seat: Seat) => {
     let baseClasses = "w-12 h-12 rounded-lg border-2 flex items-center justify-center text-xs font-bold cursor-pointer transition-all duration-200 relative ";

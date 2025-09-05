@@ -144,52 +144,51 @@ export const DriverApp = () => {
 
   // ✅ FIXED: fetchMyRides - Use status field instead of is_active
   const fetchMyRides = async () => {
-    if (!profile?.id) return;
-    setLoading(true);
-    try {
-      console.log('🚗 Fetching rides for driver:', profile.id);
-      
-      const { data, error } = await supabase
-        .from('rides')
-        .select(`
-          *,
-          vehicles (
-            car_model,
-            car_type,
-            color
-          )
-        `)
-        .eq('driver_id', profile.id)
-        .eq('status', 'active') // ✅ FIXED: Use status field
-        .order('departure_date', { ascending: true });
+  if (!profile?.id) return;
+  setLoading(true);
+  try {
+    console.log('🚗 Fetching rides for driver:', profile.id);
+    
+    const { data, error } = await supabase
+      .from('rides')
+      .select(`
+        *,
+        vehicles (
+          car_model,
+          car_type,
+          color
+        )
+      `)
+      .eq('driver_id', profile.id)
+      .eq('status', 'active') // ✅ FIXED: Correct field name
+      .order('departure_date', { ascending: true });
 
-      console.log('🚗 Rides query result:', { data, error });
+    console.log('🚗 Rides query result:', { data, error });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setMyRides(data || []);
+    setMyRides(data || []);
 
-      // Calculate today's rides
-      const today = new Date().toISOString().split('T')[0];
-      const todaysRides = (data || []).filter(ride => 
-        ride.departure_date === today
-      );
+    // Calculate today's rides
+    const today = new Date().toISOString().split('T')[0];
+    const todaysRides = (data || []).filter(ride => 
+      ride.departure_date === today
+    );
 
-      setTodaysRides(todaysRides);
-      setStats(prev => ({ ...prev, activeRides: todaysRides.length }));
-      
-    } catch (error) {
-      console.error('❌ Error fetching rides:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch your rides",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
+    setTodaysRides(todaysRides);
+    setStats(prev => ({ ...prev, activeRides: todaysRides.length }));
+    
+  } catch (error) {
+    console.error('❌ Error fetching rides:', error);
+    toast({
+      title: "Error",
+      description: "Failed to fetch your rides",
+      variant: "destructive"
+    });
+  } finally {
+    setLoading(false);
+  }
+};
   // Fix 2: fetchUpcomingRides - Simplified approach with status field
   const fetchUpcomingRides = async () => {
     if (!profile?.id) return;
@@ -358,55 +357,37 @@ export const DriverApp = () => {
 
   // ✅ FIXED: handleCancelRide - Use status field instead of is_active
   const handleCancelRide = async (rideId: string) => {
-    if (!profile?.id) {
-      toast({
-        title: "Error",
-        description: "User not authenticated",
-        variant: "destructive"
-      });
-      return;
+  if (!profile?.id) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('rides')
+      .update({ 
+        status: 'cancelled', // ✅ FIXED: Use status field
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', rideId)
+      .eq('driver_id', profile.id)
+      .select();
+
+    if (error) throw error;
+    
+    if (!data || data.length === 0) {
+      throw new Error('Ride not found or permission denied');
     }
 
-    try {
-      console.log('Attempting to cancel ride:', rideId);
-      
-      // ✅ FIXED: Update status instead of is_active
-      const { data, error } = await supabase
-        .from('rides')
-        .update({ 
-          status: 'cancelled', // ✅ FIXED: Use status field
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', rideId)
-        .eq('driver_id', profile.id) // Ensure only the driver can cancel their own ride
-        .select();
-
-      if (error) {
-        console.error('Update error:', error);
-        throw error;
-      }
-
-      if (!data || data.length === 0) {
-        throw new Error('Ride not found or you do not have permission to cancel this ride');
-      }
-
-      console.log('Ride cancelled successfully');
-      toast({
-        title: "Success",
-        description: "Ride cancelled successfully"
-      });
-      fetchMyRides();
-      fetchUpcomingRides();
-    } catch (error) {
-      console.error('Error cancelling ride:', error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to cancel ride. Please try again.";
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive"
-      });
-    }
-  };
+    toast({ title: "Success", description: "Ride cancelled successfully" });
+    fetchMyRides();
+    fetchUpcomingRides();
+  } catch (error) {
+    console.error('Error cancelling ride:', error);
+    toast({
+      title: "Error",
+      description: "Failed to cancel ride. Please try again.",
+      variant: "destructive"
+    });
+  }
+};
 
   const handleEditRide = (ride: Ride) => {
     setEditingRide(ride);

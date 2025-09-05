@@ -110,105 +110,83 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
 
   
   const onSubmit = async (data: PostRideFormData) => {
-    if (!user) return;
-    
-    setLoading(true);
-    
-    const rideData = {
-      driver_id: user.id,
-      vehicle_id: data.vehicleId,
-      from_city: data.fromCity,
-      to_city: data.toCity,
-      departure_date: format(data.departureDate, 'yyyy-MM-dd'),
-      departure_time: data.departureTime,
-      pickup_point: data.pickupPoint,
-      available_seats: data.availableSeats,
-      total_seats: data.availableSeats,
-      base_price: data.basePrice,
-      price_per_seat: data.basePrice,
-      notes: data.notes || null,
-      status: 'active', // ✅ FIXED: Use status instead of is_active
-      vehicle_type: null,
-    };
-    
-    try {
-      console.log('Attempting to insert ride data:', rideData);
-      let result;
-      
-      if (editData) {
-        // For updates, make sure status is included
-        result = await supabase
-          .from('rides')
-          .update({
-            ...rideData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editData.id)
-          .select();
-      } else {
-        // For inserts, use the complete rideData object
-        result = await supabase
-          .from('rides')
-          .insert(rideData)
-          .select();
-      }
-      
-      console.log('Supabase result:', result);
-      if (result.error) {
-        console.error('Supabase error details:', result.error);
-        throw result.error;
-      }
-      
-      toast({
-        title: 'Success',
-        description: editData 
-          ? 'Ride updated successfully!' 
-          : 'Main ride posted successfully!',
-      });
-      
-      if (!editData) {
-        setRidePosted(true);
-        setCurrentStep('return');
-      } else {
-        form.reset();
-        onSuccess();
-      }
-    } catch (error: unknown) {
-      console.error('Error posting ride:', error);
-      console.error('Ride data that failed:', rideData);
-      
-      let errorMessage = 'Please try again.';
-      
-      if (error && typeof error === 'object' && 'message' in error) {
-        const errorMsg = (error as { message: string }).message;
-        
-        if (errorMsg.includes('is_active')) {
-          errorMessage = 'Database schema issue. The ride status field is being updated.';
-        } else if (errorMsg.includes('duplicate key')) {
-          errorMessage = 'A ride with these details already exists.';
-        } else if (errorMsg.includes('foreign key')) {
-          errorMessage = 'Please select a valid vehicle.';
-        } else if (errorMsg.includes('check constraint')) {
-          errorMessage = 'Please check your input values.';
-        } else if (errorMsg.includes('not-null constraint')) {
-          errorMessage = 'Missing required information. Please fill all fields.';
-        } else {
-          errorMessage = errorMsg;
-        }
-      }
-      
-      toast({
-        title: 'Error',
-        description: editData 
-          ? `Failed to update ride: ${errorMessage}` 
-          : `Failed to post ride: ${errorMessage}`,
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!user) return;
+  
+  setLoading(true);
 
+  // Combine date + time into a single timestamp
+  const departureTimestamp = new Date(
+    `${format(data.departureDate, 'yyyy-MM-dd')}T${data.departureTime}`
+  ).toISOString();
+  
+  const rideData = {
+  driver_id: user.id,
+  vehicle_id: data.vehicleId,
+  from_city: data.fromCity,
+  to_city: data.toCity,
+  departure_date: format(data.departureDate, 'yyyy-MM-dd'),
+  departure_time: data.departureTime,
+  departure_timestamp: departureTimestamp,   // ✅ FIXED
+  pickup_point: data.pickupPoint,
+  available_seats: data.availableSeats,
+  total_seats: data.availableSeats,
+  base_price: data.basePrice,
+  price_per_seat: data.basePrice,
+  notes: data.notes || null,
+  status: 'active',
+  vehicle_type: null,
+  created_at: new Date().toISOString(),
+};
+
+  
+  try {
+    console.log('Attempting to insert ride data:', rideData);
+    let result;
+    
+    if (editData) {
+      result = await supabase
+        .from('rides')
+        .update({
+          ...rideData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editData.id)
+        .select();
+    } else {
+      result = await supabase
+        .from('rides')
+        .insert(rideData)
+        .select();
+    }
+    
+    if (result.error) throw result.error;
+    
+    toast({
+      title: 'Success',
+      description: editData ? 'Ride updated successfully!' : 'Ride posted successfully!',
+    });
+    
+    if (!editData) {
+      setRidePosted(true);
+      setCurrentStep('return');
+    } else {
+      form.reset();
+      onSuccess();
+    }
+  } catch (error: any) {
+    console.error('Error posting ride:', error);
+    
+    toast({
+      title: 'Error',
+      description: editData 
+        ? `Failed to update ride: ${error.message}` 
+        : `Failed to post ride: ${error.message}`,
+      variant: 'destructive',
+    });
+  } finally {
+    setLoading(false);
+  }
+};
   const handleReturnRideComplete = (returnRideData?: any) => {
     if (returnRideData) {
       toast({
@@ -585,6 +563,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
           </div>
         </TabsContent>
 
+        {/* Step 4: Return */}
         <TabsContent value="return" className="space-y-6">
           {ridePosted && watchedValues.departureDate && (
             <ReturnRideForm
@@ -594,12 +573,13 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                 departureDate: watchedValues.departureDate,
                 vehicleId: watchedValues.vehicleId,
                 availableSeats: watchedValues.availableSeats,
-                pricePerSeat: watchedValues.basePrice, // Use basePrice for pricePerSeat
+                pricePerSeat: watchedValues.basePrice,
               }}
               onSuccess={handleReturnRideComplete}
             />
           )}
         </TabsContent>
+
       </Tabs>
     </div>
   );

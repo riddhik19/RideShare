@@ -91,6 +91,7 @@ export const DynamicSeatBooking: React.FC<DynamicSeatBookingProps> = ({
 
   // Updated confirmBooking function with proper seat_id handling
   // Update confirmBooking function in DynamicSeatBooking.tsx (around line 80)
+  // ✅ FIXED: confirmBooking with seat-specific pricing
 const confirmBooking = async () => {
   if (!selectedSeat || !layoutConfig) return;
   
@@ -120,23 +121,24 @@ const confirmBooking = async () => {
     
     if (!seat) throw new Error('Seat not found');
 
+    // ✅ FIXED: Dynamic pricing implementation
     const basePrice = ride.base_price || ride.price_per_seat;
     let seatPrice = basePrice;
-    if (seat.type === 'front') seatPrice += 100;
-    else if (seat.type === 'window') seatPrice += 50;
+    if (seat.type === 'front') seatPrice += 100; // Front seat premium
+    else if (seat.type === 'window') seatPrice += 50; // Window seat premium
 
-    // ✅ FIXED: Create booking with proper seat_id field
+    // ✅ FIXED: Create booking with seat_id and booking_date
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
       .insert({
         ride_id: ride.id,
         passenger_id: userId,
-        seat_id: selectedSeat, // ✅ Add seat_id
+        seat_id: selectedSeat, // ✅ Store selected seat
         seats_booked: 1,
         total_price: seatPrice,
         status: 'confirmed',
-        selected_seats: [selectedSeat], // ✅ Also store in array
-        booking_date: new Date().toISOString().split('T')[0], // ✅ Add booking_date
+        selected_seats: [selectedSeat], // ✅ Array of selected seats
+        booking_date: new Date().toISOString().split('T')[0], // ✅ Add booking date
       })
       .select()
       .single();
@@ -175,7 +177,6 @@ const confirmBooking = async () => {
     setBookingInProgress(false);
   }
 };
-
   if (!layoutConfig) {
     return (
       <Card>
