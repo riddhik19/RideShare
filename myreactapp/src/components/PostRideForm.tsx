@@ -1,3 +1,8 @@
+// Fixed PostRideForm.tsx - Key fixes:
+// 1. Ensure available_seats <= total_seats
+// 2. Add proper validation before submission
+// 3. Handle all required fields correctly
+
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -63,7 +68,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
       departureTime: editData?.departure_time || '',
       pickupPoint: editData?.pickup_point || '',
       availableSeats: editData?.available_seats || 1,
-      basePrice: editData?.base_price || editData?.price_per_seat || 0, // Handle both fields
+      basePrice: editData?.base_price || editData?.price_per_seat || 0,
       vehicleId: editData?.vehicle_id || '',
       notes: editData?.notes || '',
     },
@@ -108,92 +113,138 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     }
   };
 
-  
+  // ✅ FIXED: Completely rewritten onSubmit with proper validation
   const onSubmit = async (data: PostRideFormData) => {
-  if (!user) return;
-  
-  setLoading(true);
+    if (!user) return;
+    
+    setLoading(true);
 
-  // Combine date + time into a single timestamp
-  const departureTimestamp = new Date(
-    `${format(data.departureDate, 'yyyy-MM-dd')}T${data.departureTime}`
-  ).toISOString();
-  
-  const rideData = {
-    driver_id: user.id,
-    vehicle_id: data.vehicleId,
-    from_city: data.fromCity,
-    to_city: data.toCity,
-    departure_date: format(data.departureDate, 'yyyy-MM-dd'),
-    departure_time: data.departureTime,
-    departure_timestamp: departureTimestamp, // Required field
-    pickup_point: data.pickupPoint,
-    available_seats: data.availableSeats,
-    total_seats: data.availableSeats, // Set total_seats field
-    base_price: data.basePrice, // Set base_price field
-    price_per_seat: data.basePrice,
-    notes: data.notes || null,
-    status: 'active', // ✅ CRITICAL: Use status field instead of is_active
-    vehicle_type: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    try {
+      // ✅ CRITICAL FIX: Get vehicle seat capacity to validate available_seats
+      const selectedVehicle = vehicles.find(v => v.id === data.vehicleId);
+      if (!selectedVehicle) {
+        throw new Error('Please select a valid vehicle');
+      }
+
+      const vehicleSeatCapacity = selectedVehicle.seat_capacity;
+      
+      // ✅ CRITICAL FIX: Ensure available_seats doesn't exceed vehicle capacity
+      const availableSeats = Math.min(data.availableSeats, vehicleSeatCapacity);
+      
+      // ✅ FIXED: Properly format departure timestamp
+      const departureTimestamp = new Date(
+        `${format(data.departureDate, 'yyyy-MM-dd')}T${data.departureTime}`
+      ).toISOString();
+      
+      // ✅ FIXED: Prepare ride data with all required fields and constraints
+      const rideData = {
+        driver_id: user.id,
+        vehicle_id: data.vehicleId,
+        from_city: data.fromCity.trim(),
+        to_city: data.toCity.trim(),
+        departure_date: format(data.departureDate, 'yyyy-MM-dd'),
+        departure_time: data.departureTime,
+        departure_timestamp: departureTimestamp,
+        pickup_point: data.pickupPoint.trim(),
+        available_seats: availableSeats, // ✅ FIXED: Use validated available seats
+        total_seats: vehicleSeatCapacity, // ✅ FIXED: Set to vehicle capacity
+        base_price: data.basePrice,
+        price_per_seat: data.basePrice,
+        notes: data.notes?.trim() || null,
+        status: 'active',
+        vehicle_type: selectedVehicle.car_type || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // ✅ VALIDATION: Additional client-side checks before sending to database
+      if (rideData.available_seats <= 0) {
+        throw new Error('Available seats must be greater than 0');
+      }
+      
+      if (rideData.available_seats > vehicleSeatCapacity) {
+        throw new Error(`Available seats cannot exceed vehicle capacity (${vehicleSeatCapacity})`);
+      }
+
+      if (rideData.from_city === rideData.to_city) {
+        throw new Error('From and To cities cannot be the same');
+      }
+
+      if (new Date(departureTimestamp) <= new Date()) {
+        throw new Error('Departure time must be in the future');
+      }
+
+      console.log('🚗 Validated ride data:', rideData);
+      
+      let result;
+      
+      if (editData) {
+        result = await supabase
+          .from('rides')
+          .update({
+            ...rideData,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editData.id)
+          .select();
+      } else {
+        result = await supabase
+          .from('rides')
+          .insert(rideData)
+          .select();
+      }
+      
+      console.log('🚗 Database operation result:', result);
+      
+      if (result.error) {
+        console.error('❌ Database error details:', result.error);
+        
+        // ✅ IMPROVED: Better error handling with specific messages
+        let errorMessage = result.error.message;
+        
+        if (result.error.code === '23514') {
+          if (result.error.message.includes('check_available_seats_valid')) {
+            errorMessage = `Available seats (${rideData.available_seats}) cannot exceed vehicle capacity (${vehicleSeatCapacity}). Please reduce the number of available seats.`;
+          } else if (result.error.message.includes('check_base_price_positive')) {
+            errorMessage = 'Price must be greater than 0';
+          } else if (result.error.message.includes('check_total_seats_range')) {
+            errorMessage = 'Total seats must be between 1 and 8';
+          } else {
+            errorMessage = 'The ride data violates database constraints. Please check your input values.';
+          }
+        } else if (result.error.code === '23505') {
+          errorMessage = 'A similar ride already exists. Please modify your ride details.';
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      console.log('✅ Ride operation successful:', result.data);
+      
+      toast({
+        title: 'Success',
+        description: editData ? 'Ride updated successfully!' : 'Ride posted successfully!',
+      });
+      
+      if (!editData) {
+        setRidePosted(true);
+        setCurrentStep('return');
+      } else {
+        form.reset();
+        onSuccess();
+      }
+    } catch (error: any) {
+      console.error('❌ Error in ride operation:', error);
+      
+      toast({
+        title: 'Error',
+        description: error.message || (editData ? 'Failed to update ride' : 'Failed to post ride'),
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
-
-  try {
-    console.log('🚗 Attempting to insert ride data:', rideData);
-    let result;
-    
-    if (editData) {
-      result = await supabase
-        .from('rides')
-        .update({
-          ...rideData,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', editData.id)
-        .select();
-    } else {
-      result = await supabase
-        .from('rides')
-        .insert(rideData)
-        .select();
-    }
-    
-    console.log('🚗 Ride operation result:', result);
-    
-    if (result.error) {
-      console.error('❌ Database error:', result.error);
-      throw result.error;
-    }
-    
-    console.log('✅ Ride posted successfully:', result.data);
-    
-    toast({
-      title: 'Success',
-      description: editData ? 'Ride updated successfully!' : 'Ride posted successfully!',
-    });
-    
-    if (!editData) {
-      setRidePosted(true);
-      setCurrentStep('return');
-    } else {
-      form.reset();
-      onSuccess();
-    }
-  } catch (error: any) {
-    console.error('❌ Error posting ride:', error);
-    
-    toast({
-      title: 'Error',
-      description: editData 
-        ? `Failed to update ride: ${error.message}` 
-        : `Failed to post ride: ${error.message}`,
-      variant: 'destructive',
-    });
-  } finally {
-    setLoading(false);
-  }
-};
 
   const handleReturnRideComplete = (returnRideData?: any) => {
     if (returnRideData) {
@@ -221,11 +272,13 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
     }
   };
 
-  
-
   const watchedValues = form.watch();
   const canShowRoute = watchedValues.fromCity && watchedValues.toCity;
   const canShowPricing = watchedValues.availableSeats && watchedValues.basePrice;
+
+  // ✅ FIXED: Get selected vehicle for validation display
+  const selectedVehicle = vehicles.find(v => v.id === watchedValues.vehicleId);
+  const maxSeats = selectedVehicle?.seat_capacity || 8;
 
   return (
     <div className="w-full max-w-4xl mx-auto">
@@ -371,37 +424,6 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
               <div className="grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
-                  name="availableSeats"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Available Seats</FormLabel>
-                      <FormControl>
-                        <Input type="number" min="1" max="8" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="basePrice"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Base Price (Middle Seat)</FormLabel>
-                      <FormControl>
-                        <Input type="number" min="0.01" step="0.01" placeholder="0.00" {...field} />
-                      </FormControl>
-                      <FormDescription>
-                        Front seat: +₹100, Window seat: +₹50
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
                   name="vehicleId"
                   render={({ field }) => (
                     <FormItem>
@@ -416,7 +438,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                           <SelectContent>
                             {vehicles.map((vehicle) => (
                               <SelectItem key={vehicle.id} value={vehicle.id}>
-                                {vehicle.car_model} ({vehicle.license_plate})
+                                {vehicle.car_model} ({vehicle.license_plate}) - {vehicle.seat_capacity} seats
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -444,6 +466,48 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name="availableSeats"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Available Seats</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          min="1" 
+                          max={maxSeats}
+                          {...field} 
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {selectedVehicle ? 
+                          `Max: ${selectedVehicle.seat_capacity} seats (${selectedVehicle.car_model})` : 
+                          'Select vehicle first'
+                        }
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="basePrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Base Price (Middle Seat)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0.01" step="0.01" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Front seat: +₹100, Window seat: +₹50
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <FormField
@@ -463,6 +527,17 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                 )}
               />
 
+              {/* ✅ ADDED: Validation warning */}
+              {selectedVehicle && watchedValues.availableSeats > selectedVehicle.seat_capacity && (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Available seats ({watchedValues.availableSeats}) cannot exceed your vehicle capacity ({selectedVehicle.seat_capacity}). 
+                    It will be automatically adjusted to {selectedVehicle.seat_capacity}.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="flex justify-between">
                 <Button 
                   type="button" 
@@ -473,7 +548,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                   Preview Pricing
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
-                <Button type="submit" disabled={loading}>
+                <Button type="submit" disabled={loading || !selectedVehicle}>
                   {loading ? (editData ? 'Updating...' : 'Posting...') : (editData ? 'Update Ride' : 'Post Ride')}
                 </Button>
               </div>
@@ -481,6 +556,7 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
           </Form>
         </TabsContent>
 
+        {/* Other tabs remain the same... */}
         <TabsContent value="pricing" className="space-y-6">
           <Alert>
             <Info className="h-4 w-4" />
@@ -489,10 +565,10 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
             </AlertDescription>
           </Alert>
           
-          {canShowPricing && (
+          {canShowPricing && selectedVehicle && (
             <EnhancedSeatVisualization
-              totalSeats={watchedValues.availableSeats}
-              availableSeats={watchedValues.availableSeats}
+              totalSeats={Math.min(watchedValues.availableSeats, selectedVehicle.seat_capacity)}
+              availableSeats={Math.min(watchedValues.availableSeats, selectedVehicle.seat_capacity)}
               basePrice={watchedValues.basePrice}
               vehicleType="car"
               isSelectable={false}
@@ -571,7 +647,6 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
           </div>
         </TabsContent>
 
-        {/* Step 4: Return */}
         <TabsContent value="return" className="space-y-6">
           {ridePosted && watchedValues.departureDate && (
             <ReturnRideForm
@@ -580,14 +655,13 @@ export const PostRideForm: React.FC<PostRideFormProps> = ({ onSuccess, editData 
                 toCity: watchedValues.toCity,
                 departureDate: watchedValues.departureDate,
                 vehicleId: watchedValues.vehicleId,
-                availableSeats: watchedValues.availableSeats,
+                availableSeats: Math.min(watchedValues.availableSeats, selectedVehicle?.seat_capacity || 8),
                 pricePerSeat: watchedValues.basePrice,
               }}
               onSuccess={handleReturnRideComplete}
             />
           )}
         </TabsContent>
-
       </Tabs>
     </div>
   );
