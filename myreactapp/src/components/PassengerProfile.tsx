@@ -110,7 +110,10 @@ const PassengerProfile = () => {
           <div className="flex items-center space-x-6">
             <div className="relative">
               <Avatar className="h-24 w-24">
-                <AvatarImage src={profile?.avatar_url} alt={profile?.full_name} />
+                <AvatarImage 
+                  src={profile?.avatar_url || ''} 
+                  alt={profile?.full_name || 'Passenger'} 
+                />
                 <AvatarFallback>{profile?.full_name?.charAt(0) || 'P'}</AvatarFallback>
               </Avatar>
               <div className="absolute -bottom-2 -right-2">

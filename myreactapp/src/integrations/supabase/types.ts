@@ -657,6 +657,7 @@ export type Database = {
           ratings_count: number
         }
       }
+      
     }
     Enums: {
       booking_status: "pending" | "confirmed" | "cancelled" | "completed"
